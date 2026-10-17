@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Horários - Diac/SGA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- html2pdf.js para Exportação PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        /* Custom Fine Scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        /* Estilos de Impressão */
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; font-size: 10pt; }
+            .print-full-width { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+            .schedule-cell { height: auto !important; min-height: 36px !important; }
+            .time-slot-block { padding: 1px 2px !important; font-size: 8pt !important; }
+            @page { size: A4 landscape; margin: 0.8cm; }
+        }
+
+        /* Classes de Interação Drag & Drop */
+        .dragging { opacity: 0.5; border: 2px dashed #3b82f6 !important; }
+        .drag-over { background-color: #e0f2fe !important; border: 2px dashed #0284c7 !important; }
+        
+        .selectable-cell { user-select: none; }
+        .selected-cell { background-color: #bae6fd !important; }
+
+        /* Estilo do Card em Modo Remoto (Borda 3px Tracejada) */
+        .slot-remoto {
+            background-color: transparent !important;
+            border-style: dashed !important;
+            border-width: 3px !important;
+            color: #0f172a !important;
+        }
+
+        /* Efeitos de Animação de Alerta */
+        @keyframes pulse-banner {
+            0%, 100% { opacity: 1; transform: translateY(0); }
+            50% { opacity: 0.95; transform: translateY(-1px); }
+        }
+        .banner-overload { animation: pulse-banner 2s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-slate-900 text-white shadow-lg sticky top-0 z-30 no-print">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 p-2 rounded-lg text-white shadow-sm">
+                    <i class="fa-solid fa-calendar-days text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight tracking-tight">Gestão de Horários</h1>
+                    <p class="text-xs text-slate-400 font-medium">Diac/SGA</p>
+                </div>
+            </div>
+
+            <!-- Botões de Ação Principais -->
+            <div class="flex items-center space-x-2.5">
+                <button onclick="openServerModal()" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                    <i class="fa-solid fa-user-plus"></i> <span class="hidden sm:inline">Novo Servidor</span>
+                </button>
+                <button onclick="exportToPDF()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3.5 py-2 rounded-lg text-sm font-medium flex items-center gap-2 transition shadow-sm" title="Baixar grade formatada em PDF">
+                    <i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Baixar PDF</span>
+                </button>
+                <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-print"></i> <span class="hidden md:inline">Imprimir</span>
+                </button>
+                <button onclick="confirmClearSchedule()" class="bg-red-600/20 hover:bg-red-600/30 text-red-300 border border-red-500/30 px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1.5 transition" title="Limpar toda a grade de horários">
+                    <i class="fa-solid fa-trash-can"></i> <span class="hidden md:inline">Limpar Grade</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- BANNERS DE ALERTA DE HORAS EXCEDIDAS -->
+    <div id="alerts-container" class="no-print max-w-[1600px] w-full mx-auto px-4 sm:px-6 pt-4 hidden">
+        <!-- Notificações geradas dinamicamente aqui -->
+    </div>
+
+    <main class="flex-1 max-w-[1600px] w-full mx-auto p-4 sm:p-6 grid grid-cols-1 lg:grid-cols-12 gap-6 print-full-width">
+        
+        <!-- PAINEL LATERAL: LISTA DE SERVIDORES -->
+        <aside class="lg:col-span-4 xl:col-span-3 flex flex-col gap-4 no-print">
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col h-[calc(100vh-7.5rem)] sticky top-20">
+                <div class="flex items-center justify-between mb-3 pb-3 border-b border-slate-100">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-users text-slate-500"></i>
+                        <h2 class="font-semibold text-slate-800">Servidores</h2>
+                        <span id="server-count" class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+                    </div>
+                    <input type="text" id="search-server" oninput="renderServers()" placeholder="Buscar..." class="text-xs bg-slate-50 border border-slate-200 rounded-md px-2 py-1 w-28 focus:outline-none focus:ring-1 focus:ring-blue-500">
+                </div>
+
+                <p class="text-xs text-slate-500 mb-3">
+                    <i class="fa-solid fa-circle-info text-blue-500 mr-1"></i> Arraste o card para a grade. Vários servidores são permitidos no mesmo horário!
+                </p>
+
+                <!-- Lista dos Servidores -->
+                <div id="servers-list" class="flex-1 overflow-y-auto space-y-3 pr-1">
+                    <!-- Cards carregados via JavaScript -->
+                </div>
+
+                <div class="mt-3 pt-3 border-t border-slate-100 text-[11px] text-slate-500 text-center flex justify-between items-center">
+                    <span>Legenda de Carga:</span>
+                    <div class="flex gap-2">
+                        <span class="text-emerald-600 font-medium"><i class="fa-solid fa-circle text-[8px]"></i> 100%</span>
+                        <span class="text-amber-600 font-medium"><i class="fa-solid fa-circle text-[8px]"></i> Parcial</span>
+                        <span class="text-red-600 font-bold"><i class="fa-solid fa-circle text-[8px]"></i> Excedida</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+
+        <!-- ÁREA PRINCIPAL: GRADE DE HORÁRIOS -->
+        <section class="lg:col-span-8 xl:col-span-9 flex flex-col gap-4 print-full-width">
+            
+            <!-- Barra de Ferramentas e Filtros -->
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 no-print">
+                <div class="flex items-center gap-3">
+                    <span class="text-sm font-medium text-slate-600">Filtrar/Destacar:</span>
+                    <select id="filter-server-highlight" onchange="highlightServerSchedule(this.value)" class="bg-slate-50 border border-slate-200 text-sm rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="ALL">Mostrar Todos os Servidores</option>
+                    </select>
+                </div>
+
+                <div class="flex items-center gap-4 text-xs text-slate-500">
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-3.5 h-3.5 rounded border-2 border-dashed border-slate-700 bg-transparent inline-block"></span>
+                        <span class="font-medium text-slate-700">Remoto</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <span class="w-3.5 h-3.5 rounded bg-blue-200 border border-blue-400 inline-block"></span>
+                        <span>Presencial</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Tabela para Exportação/Visualização -->
+            <div id="pdf-container" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print-full-width p-2">
+                <!-- Cabeçalho Exclusivo de Impressão/PDF -->
+                <div class="hidden print:block mb-4 text-center border-b pb-2">
+                    <h2 class="text-xl font-bold text-slate-800">Gestão de Horários - Diac/SGA</h2>
+                    <p class="text-xs text-slate-500">Quadro Horário Semanal Integrado dos Servidores</p>
+                </div>
+                
+                <!-- Container da Tabela com Rolagem -->
+                <div class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-13.5rem)] print:max-h-none">
+                    <table class="w-full border-collapse text-left text-xs min-w-[750px]">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-20 shadow-sm">
+                                <th class="py-3 px-2 w-20 text-center font-bold border-r border-slate-200 bg-slate-100">
+                                    <i class="fa-regular fa-clock mr-1"></i> Horário
+                                </th>
+                                <th class="py-3 px-2 text-center font-bold border-r border-slate-200 w-1/5">SEG</th>
+                                <th class="py-3 px-2 text-center font-bold border-r border-slate-200 w-1/5">TER</th>
+                                <th class="py-3 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUA</th>
+                                <th class="py-3 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUI</th>
+                                <th class="py-3 px-2 text-center font-bold w-1/5">SEX</th>
+                            </tr>
+                        </thead>
+                        <tbody id="schedule-body" class="divide-y divide-slate-200">
+                            <!-- Gerado via JavaScript (SEG a SEX - 07:00 às 22:00) -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- MODAL DE CADASTRO E EDIÇÃO DE SERVIDOR -->
+    <div id="modal-server" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-md overflow-hidden transform transition-all p-6">
+            <div class="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+                <h3 id="modal-title" class="text-lg font-bold text-slate-800">Cadastrar Novo Servidor</h3>
+                <button onclick="closeServerModal()" class="text-slate-400 hover:text-slate-600 p-1 rounded-lg">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form id="form-server" onsubmit="saveServer(event)" class="space-y-4">
+                <input type="hidden" id="server-id">
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Fantasia / Apelido *</label>
+                    <input type="text" id="server-nickname" required placeholder="Ex: João Silva ou Prof. João" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Completo *</label>
+                    <input type="text" id="server-fullname" required placeholder="Ex: João da Silva Santos" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Matrícula</label>
+                        <input type="text" id="server-reg" placeholder="Ex: 123456" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Função/Cargo *</label>
+                        <input type="text" id="server-role" required placeholder="Ex: Assistente" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Carga Horária Semanal (h) *</label>
+                        <input type="number" id="server-hours" min="0.5" step="0.5" required placeholder="Ex: 40" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Cor do Card</label>
+                        <div class="flex gap-2 items-center">
+                            <input type="color" id="server-color" class="h-9 w-12 rounded border border-slate-300 cursor-pointer p-0.5">
+                            <button type="button" onclick="suggestNewColor()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-2 rounded text-xs flex-1 transition" title="Sugerir cor pastel">
+                                <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Sugerir
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div>
+                    <span class="block text-xs text-slate-500 mb-1">Sugestões de cores:</span>
+                    <div class="flex gap-1.5" id="color-palette-suggestions">
+                        <!-- Injetado via JS -->
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-4 border-t border-slate-100">
+                    <button type="button" onclick="closeServerModal()" class="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 font-medium transition">Cancelar</button>
+                    <button type="submit" class="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm font-medium shadow-sm transition">Salvar Servidor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script>
+        // --- CONSTANTES E ESTADO GLOBAL ---
+        const DAYS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
+        const START_HOUR = 7;
+        const END_HOUR = 22;
+
+        let servers = [];
+        /*
+          Estrutura do Mapeamento de Horários:
+          schedule = {
+             "SEG_07:00": [ { serverId: "s1", isRemote: false }, { serverId: "s2", isRemote: true } ],
+             ...
+          }
+        */
+        let schedule = {};
+        let draggedServerId = null;
+        let isMouseDown = false;
+        let selectionStartCell = null;
+        let selectedCells = [];
+
+        // Cores Pastel Pré-definidas
+        const PASTEL_COLORS = [
+            '#e0f2fe', '#dcfce7', '#fef9c3', '#ffe4e6', '#f3e8ff', 
+            '#ffedd5', '#e0e7ff', '#ccfbf1', '#fae8ff', '#f1f5f9'
+        ];
+
+        // --- INICIALIZAÇÃO DA PÁGINA ---
+        window.onload = function() {
+            loadFromLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            renderColorPaletteSuggestions();
+            checkAndRenderOverloadAlerts();
+            setupGlobalMouseEvents();
+        };
+
+        // --- PERSISTÊNCIA LOCALSTORAGE ---
+        function saveToLocalStorage() {
+            localStorage.setItem('diac_sga_servers', JSON.stringify(servers));
+            localStorage.setItem('diac_sga_schedule', JSON.stringify(schedule));
+        }
+
+        function loadFromLocalStorage() {
+            const savedServers = localStorage.getItem('diac_sga_servers');
+            const savedSchedule = localStorage.getItem('diac_sga_schedule');
+
+            if (savedServers) {
+                servers = JSON.parse(savedServers);
+            } else {
+                // Servidores para Demonstração Inicial
+                servers = [
+                    { id: 's1', nickname: 'Ana Silva', fullname: 'Ana Clara Silva', reg: '10293', role: 'Atendimento', hours: 20, color: '#e0f2fe' },
+                    { id: 's2', nickname: 'Carlos Souza', fullname: 'Carlos Eduardo Souza', reg: '88392', role: 'TI / Suporte', hours: 40, color: '#dcfce7' },
+                    { id: 's3', nickname: 'Mariana Costa', fullname: 'Mariana Luz Costa', reg: '47281', role: 'Administrativo', hours: 30, color: '#fef9c3' }
+                ];
+            }
+
+            if (savedSchedule) {
+                schedule = JSON.parse(savedSchedule);
+                // Garantir compatibilidade com estrutura antiga (se houver migração)
+                for (let key in schedule) {
+                    if (typeof schedule[key] === 'string') {
+                        schedule[key] = [{ serverId: schedule[key], isRemote: false }];
+                    }
+                }
+            }
+        }
+
+        // --- RENDEREIZAÇÃO DA GRADE SEMANAL ---
+        function renderScheduleTable() {
+            const tbody = document.getElementById('schedule-body');
+            tbody.innerHTML = '';
+
+            for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                for (let min of [0, 30]) {
+                    const timeString = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-50/50 transition-colors";
+
+                    // Coluna do Horário
+                    const tdTime = document.createElement('td');
+                    tdTime.className = "py-1 px-2 font-semibold text-center border-r border-b border-slate-200 text-slate-500 bg-slate-50/80 select-none text-[11px]";
+                    tdTime.innerText = timeString;
+                    tr.appendChild(tdTime);
+
+                    // Colunas de cada dia da semana (SEG-SEX)
+                    DAYS.forEach(day => {
+                        const cellId = `${day}_${timeString}`;
+                        const td = document.createElement('td');
+                        td.className = "schedule-cell border-r border-b border-slate-200 p-1 relative min-h-[38px] vertical-top selectable-cell cursor-pointer transition-all";
+                        td.dataset.cellId = cellId;
+
+                        // Container Flexível para Suportar Múltiplos Servidores
+                        const cellContainer = document.createElement('div');
+                        cellContainer.className = "flex flex-col gap-1 w-full h-full min-h-[32px]";
+
+                        // Manipuladores Drag and Drop / Seleção
+                        td.addEventListener('mousedown', (e) => handleCellMouseDown(e, cellId));
+                        td.addEventListener('mouseenter', () => handleCellMouseEnter(cellId));
+                        td.addEventListener('dragover', handleDragOver);
+                        td.addEventListener('dragleave', handleDragLeave);
+                        td.addEventListener('drop', (e) => handleDrop(e, cellId));
+
+                        // Renderizar Servidores do Horário
+                        const allocations = schedule[cellId] || [];
+                        allocations.forEach((alloc, index) => {
+                            const server = servers.find(s => s.id === alloc.serverId);
+                            if (server) {
+                                const block = createScheduleBlock(server, cellId, index, alloc.isRemote);
+                                cellContainer.appendChild(block);
+                            }
+                        });
+
+                        td.appendChild(cellContainer);
+                        tr.appendChild(td);
+                    });
+
+                    tbody.appendChild(tr);
+                }
+            }
+        }
+
+        // Criar Bloco de Servidor no Horário (com Suporte a Remoto e Múltiplos Alocados)
+        function createScheduleBlock(server, cellId, allocIndex, isRemote = false) {
+            const block = document.createElement('div');
+            
+            // Base de classes
+            block.className = `time-slot-block w-full rounded px-1.5 py-1 flex items-center justify-between shadow-xs border transition-all text-slate-800 text-[11px] font-medium overflow-hidden group ${isRemote ? 'slot-remoto' : ''}`;
+            
+            if (isRemote) {
+                // Modo Remoto: Fundo Transparente, Borda Tracejada 3px
+                block.style.backgroundColor = 'transparent';
+                block.style.borderColor = getAdjustedColor(server.color, -50);
+            } else {
+                // Modo Presencial: Preenchido com a cor do servidor
+                block.style.backgroundColor = server.color || '#e0f2fe';
+                block.style.borderColor = getAdjustedColor(server.color, -30);
+            }
+
+            block.dataset.serverId = server.id;
+
+            // Nome Fantasia e Indicador
+            const infoDiv = document.createElement('div');
+            infoDiv.className = "flex items-center gap-1 min-w-0 truncate pointer-events-none";
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = "truncate font-semibold";
+            nameSpan.innerText = server.nickname;
+            nameSpan.title = `${server.fullname} (${server.role}) ${isRemote ? '[REMOTO]' : '[PRESENCIAL]'}`;
+
+            infoDiv.appendChild(nameSpan);
+
+            // Ações do Bloco (Botão Remoto P/R e Botão Excluir)
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = "flex items-center gap-1 flex-shrink-0 no-print";
+
+            // Botão Alternar Presencial / Remoto
+            const remoteBtn = document.createElement('button');
+            remoteBtn.type = "button";
+            remoteBtn.className = `px-1 py-0.2 text-[9px] font-bold rounded border transition ${
+                isRemote 
+                    ? 'bg-slate-800 text-white border-slate-900 hover:bg-slate-700' 
+                    : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'
+            }`;
+            remoteBtn.innerText = isRemote ? "REM" : "PRES";
+            remoteBtn.title = isRemote ? "Modo Remoto ativo. Clique para Presencial" : "Clique para alterar para Modo REMOTO";
+            remoteBtn.onclick = (e) => {
+                e.stopPropagation();
+                toggleRemoteStatus(cellId, allocIndex);
+            };
+
+            // Botão de Remoção Rápida
+            const removeBtn = document.createElement('button');
+            removeBtn.type = "button";
+            removeBtn.className = "opacity-80 group-hover:opacity-100 text-slate-400 hover:text-red-600 px-0.5 rounded transition";
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark text-xs"></i>';
+            removeBtn.title = "Remover do horário";
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                removeScheduleSlot(cellId, allocIndex);
+            };
+
+            actionsDiv.appendChild(remoteBtn);
+            actionsDiv.appendChild(removeBtn);
+
+            block.appendChild(infoDiv);
+            block.appendChild(actionsDiv);
+
+            return block;
+        }
+
+        // Alternar Presencial vs Remoto para um Servidor específico
+        function toggleRemoteStatus(cellId, allocIndex) {
+            if (schedule[cellId] && schedule[cellId][allocIndex]) {
+                schedule[cellId][allocIndex].isRemote = !schedule[cellId][allocIndex].isRemote;
+                saveToLocalStorage();
+                renderScheduleTable();
+            }
+        }
+
+        // --- RENDEREIZAÇÃO DO PAINEL DE SERVIDORES ---
+        function renderServers() {
+            const listContainer = document.getElementById('servers-list');
+            const searchVal = document.getElementById('search-server').value.toLowerCase();
+            const filterSelect = document.getElementById('filter-server-highlight');
+            
+            listContainer.innerHTML = '';
+            
+            const currentFilter = filterSelect.value;
+            filterSelect.innerHTML = '<option value="ALL">Mostrar Todos os Servidores</option>';
+
+            const filteredServers = servers.filter(s => 
+                s.nickname.toLowerCase().includes(searchVal) || 
+                s.fullname.toLowerCase().includes(searchVal) ||
+                s.role.toLowerCase().includes(searchVal)
+            );
+
+            document.getElementById('server-count').innerText = servers.length;
+
+            servers.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.innerText = `${s.nickname} (${s.role})`;
+                if (s.id === currentFilter) opt.selected = true;
+                filterSelect.appendChild(opt);
+            });
+
+            if (filteredServers.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-8 text-slate-400 text-xs">
+                        <i class="fa-solid fa-user-slash text-2xl mb-2"></i>
+                        <p>Nenhum servidor encontrado.</p>
+                    </div>`;
+                return;
+            }
+
+            filteredServers.forEach(server => {
+                const allocatedHours = calculateServerHours(server.id);
+                const progressPercent = Math.min(100, (allocatedHours / server.hours) * 100);
+                const isOverloaded = allocatedHours > server.hours;
+                
+                let statusColor = "bg-emerald-500";
+                let statusText = "text-emerald-700 font-semibold";
+                
+                if (isOverloaded) {
+                    statusColor = "bg-red-600";
+                    statusText = "text-red-600 font-bold flex items-center gap-1";
+                } else if (allocatedHours < server.hours) {
+                    statusColor = "bg-amber-500";
+                    statusText = "text-amber-700 font-medium";
+                }
+
+                const card = document.createElement('div');
+                card.className = `bg-white p-3 rounded-xl border ${isOverloaded ? 'border-red-300 ring-1 ring-red-200' : 'border-slate-200'} shadow-xs hover:shadow-md transition cursor-grab active:cursor-grabbing select-none group relative`;
+                card.draggable = true;
+
+                card.addEventListener('dragstart', (e) => handleDragStart(e, server.id));
+                card.addEventListener('dragend', handleDragEnd);
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-1.5">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3.5 h-3.5 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${server.color}"></span>
+                            <div>
+                                <h3 class="font-bold text-sm text-slate-800 leading-tight">${server.nickname}</h3>
+                                <p class="text-[11px] text-slate-500 truncate max-w-[140px]">${server.role}</p>
+                            </div>
+                        </div>
+                        
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                            <button onclick="editServer('${server.id}')" class="text-slate-400 hover:text-blue-600 p-1" title="Editar">
+                                <i class="fa-solid fa-pen text-xs"></i>
+                            </button>
+                            <button onclick="clearServerSchedule('${server.id}')" class="text-slate-400 hover:text-amber-600 p-1" title="Limpar Horários">
+                                <i class="fa-solid fa-eraser text-xs"></i>
+                            </button>
+                            <button onclick="deleteServer('${server.id}')" class="text-slate-400 hover:text-red-600 p-1" title="Excluir">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mt-2 text-xs">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-slate-500 text-[11px]">Carga Horária:</span>
+                            <span class="${statusText} text-[11px]">
+                                ${isOverloaded ? '<i class="fa-solid fa-triangle-exclamation"></i>' : ''} 
+                                ${allocatedHours}h / ${server.hours}h
+                            </span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div class="${statusColor} h-1.5 rounded-full transition-all duration-300" style="width: ${progressPercent}%"></div>
+                        </div>
+                    </div>
+                `;
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        // --- CÁLCULO DE HORAS E ALERTA DE EXCESSO DE CARGA ---
+        function calculateServerHours(serverId) {
+            let slots = 0;
+            for (let key in schedule) {
+                if (Array.isArray(schedule[key])) {
+                    schedule[key].forEach(alloc => {
+                        if (alloc.serverId === serverId) slots++;
+                    });
+                }
+            }
+            return slots * 0.5; // Cada slot de 30 min representa 0.5 hora
+        }
+
+        function checkAndRenderOverloadAlerts() {
+            const alertContainer = document.getElementById('alerts-container');
+            const overloadedServers = [];
+
+            servers.forEach(server => {
+                const allocated = calculateServerHours(server.id);
+                if (allocated > server.hours) {
+                    overloadedServers.push({
+                        server,
+                        allocated,
+                        exceeded: allocated - server.hours
+                    });
+                }
+            });
+
+            if (overloadedServers.length > 0) {
+                alertContainer.classList.remove('hidden');
+                alertContainer.innerHTML = overloadedServers.map(item => `
+                    <div class="bg-red-50 border-l-4 border-red-500 text-red-800 p-3.5 rounded-r-xl shadow-xs mb-2 flex items-center justify-between banner-overload">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-circle-exclamation text-red-600 text-lg"></i>
+                            <div>
+                                <p class="text-xs sm:text-sm font-bold">
+                                    Atenção: Carga Horária Excedida!
+                                </p>
+                                <p class="text-xs text-red-700">
+                                    O servidor <strong>${item.server.nickname}</strong> (${item.server.fullname}) ultrapassou a jornada semanal configurada de <strong>${item.server.hours}h</strong>. Horas alocadas atualmente: <strong>${item.allocated}h</strong> (+${item.exceeded}h de excesso).
+                                </p>
+                            </div>
+                        </div>
+                        <button onclick="highlightServerSchedule('${item.server.id}')" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition shadow-2xs flex-shrink-0">
+                            Ver no Quadro
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                alertContainer.classList.add('hidden');
+                alertContainer.innerHTML = '';
+            }
+        }
+
+        // --- LÓGICA DE DRAG & DROP E SELEÇÃO ---
+        function handleDragStart(e, serverId) {
+            draggedServerId = serverId;
+            e.dataTransfer.setData('text/plain', serverId);
+            e.currentTarget.classList.add('dragging');
+        }
+
+        function handleDragEnd(e) {
+            e.currentTarget.classList.remove('dragging');
+            draggedServerId = null;
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDrop(e, cellId) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+
+            if (draggedServerId) {
+                assignServerToCell(draggedServerId, cellId);
+            }
+        }
+
+        // Permite múltiplos servidores na mesma célula sem sobrescrever os existentes
+        function assignServerToCell(serverId, cellId, isRemote = false) {
+            if (!schedule[cellId]) {
+                schedule[cellId] = [];
+            }
+            
+            // Adiciona o novo servidor à lista da célula
+            schedule[cellId].push({ serverId, isRemote });
+            
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function removeScheduleSlot(cellId, allocIndex) {
+            if (schedule[cellId]) {
+                schedule[cellId].splice(allocIndex, 1);
+                if (schedule[cellId].length === 0) {
+                    delete schedule[cellId];
+                }
+                saveToLocalStorage();
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        // --- SELEÇÃO MÚLTIPLA POR CLIQUE E ARRASTE NA GRADE ---
+        function handleCellMouseDown(e, cellId) {
+            if (e.target.closest('button')) return;
+
+            isMouseDown = true;
+            selectionStartCell = cellId;
+            selectedCells = [cellId];
+            updateCellSelections();
+        }
+
+        function handleCellMouseEnter(cellId) {
+            if (!isMouseDown || !selectionStartCell) return;
+
+            const [startDay, startTime] = selectionStartCell.split('_');
+            const [currentDay, currentTime] = cellId.split('_');
+
+            if (startDay === currentDay) {
+                const times = getAllTimeSlots();
+                const startIndex = times.indexOf(startTime);
+                const currentIndex = times.indexOf(currentTime);
+
+                const minIndex = Math.min(startIndex, currentIndex);
+                const maxIndex = Math.max(startIndex, currentIndex);
+
+                selectedCells = [];
+                for (let i = minIndex; i <= maxIndex; i++) {
+                    selectedCells.push(`${startDay}_${times[i]}`);
+                }
+                updateCellSelections();
+            }
+        }
+
+        function setupGlobalMouseEvents() {
+            document.addEventListener('mouseup', () => {
+                if (isMouseDown && selectedCells.length > 0 && draggedServerId) {
+                    selectedCells.forEach(cellId => {
+                        assignServerToCell(draggedServerId, cellId);
+                    });
+                }
+                isMouseDown = false;
+                selectionStartCell = null;
+                selectedCells = [];
+                clearCellSelections();
+            });
+        }
+
+        function updateCellSelections() {
+            clearCellSelections();
+            selectedCells.forEach(id => {
+                const td = document.querySelector(`[data-cell-id="${id}"]`);
+                if (td) td.classList.add('selected-cell');
+            });
+        }
+
+        function clearCellSelections() {
+            document.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+        }
+
+        function getAllTimeSlots() {
+            const slots = [];
+            for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                for (let min of [0, 30]) {
+                    slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+                }
+            }
+            return slots;
+        }
+
+        // --- MODAL E GESTÃO DE SERVIDORES ---
+        function openServerModal(serverId = null) {
+            const modal = document.getElementById('modal-server');
+            const form = document.getElementById('form-server');
+            const title = document.getElementById('modal-title');
+
+            form.reset();
+
+            if (serverId) {
+                const server = servers.find(s => s.id === serverId);
+                if (server) {
+                    title.innerText = "Editar Servidor";
+                    document.getElementById('server-id').value = server.id;
+                    document.getElementById('server-nickname').value = server.nickname;
+                    document.getElementById('server-fullname').value = server.fullname;
+                    document.getElementById('server-reg').value = server.reg || '';
+                    document.getElementById('server-role').value = server.role;
+                    document.getElementById('server-hours').value = server.hours;
+                    document.getElementById('server-color').value = server.color;
+                }
+            } else {
+                title.innerText = "Cadastrar Novo Servidor";
+                document.getElementById('server-id').value = '';
+                suggestNewColor();
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeServerModal() {
+            document.getElementById('modal-server').classList.add('hidden');
+        }
+
+        function suggestNewColor() {
+            const randomColor = PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
+            document.getElementById('server-color').value = randomColor;
+        }
+
+        function renderColorPaletteSuggestions() {
+            const container = document.getElementById('color-palette-suggestions');
+            container.innerHTML = '';
+            PASTEL_COLORS.forEach(color => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-6 h-6 rounded-full border border-slate-300 transition transform hover:scale-110";
+                btn.style.backgroundColor = color;
+                btn.onclick = () => {
+                    document.getElementById('server-color').value = color;
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function saveServer(e) {
+            e.preventDefault();
+
+            const id = document.getElementById('server-id').value || 's_' + Date.now();
+            const nickname = document.getElementById('server-nickname').value.trim();
+            const fullname = document.getElementById('server-fullname').value.trim();
+            const reg = document.getElementById('server-reg').value.trim();
+            const role = document.getElementById('server-role').value.trim();
+            const hours = parseFloat(document.getElementById('server-hours').value);
+            const color = document.getElementById('server-color').value;
+
+            const existingIndex = servers.findIndex(s => s.id === id);
+            const serverData = { id, nickname, fullname, reg, role, hours, color };
+
+            if (existingIndex >= 0) {
+                servers[existingIndex] = serverData;
+            } else {
+                servers.push(serverData);
+            }
+
+            saveToLocalStorage();
+            renderServers();
+            renderScheduleTable();
+            checkAndRenderOverloadAlerts();
+            closeServerModal();
+        }
+
+        function editServer(id) {
+            openServerModal(id);
+        }
+
+        function deleteServer(id) {
+            if (confirm("Tem certeza que deseja excluir este servidor? Todos os horários alocados a ele serão removidos.")) {
+                servers = servers.filter(s => s.id !== id);
+                clearServerSchedule(id, false);
+                saveToLocalStorage();
+                renderServers();
+                renderScheduleTable();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function clearServerSchedule(serverId, shouldConfirm = true) {
+            if (shouldConfirm && !confirm("Deseja remover todos os horários alocados para este servidor?")) {
+                return;
+            }
+
+            for (let cellId in schedule) {
+                if (Array.isArray(schedule[cellId])) {
+                    schedule[cellId] = schedule[cellId].filter(alloc => alloc.serverId !== serverId);
+                    if (schedule[cellId].length === 0) {
+                        delete schedule[cellId];
+                    }
+                }
+            }
+
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function confirmClearSchedule() {
+            if (confirm("ATENÇÃO: Deseja limpar TODOS os horários da grade? Esta ação não poderá ser desfeita.")) {
+                schedule = {};
+                saveToLocalStorage();
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        // --- FILTRO DE DESTAQUE ---
+        function highlightServerSchedule(serverId) {
+            const blocks = document.querySelectorAll('.time-slot-block');
+            blocks.forEach(block => {
+                if (serverId === 'ALL' || block.dataset.serverId === serverId) {
+                    block.style.opacity = '1';
+                    block.classList.remove('grayscale');
+                } else {
+                    block.style.opacity = '0.15';
+                    block.classList.add('grayscale');
+                }
+            });
+        }
+
+        // --- EXPORTAÇÃO PARA PDF ---
+        function exportToPDF() {
+            const element = document.getElementById('pdf-container');
+            const removeButtons = element.querySelectorAll('button');
+            removeButtons.forEach(btn => btn.style.display = 'none');
+
+            const opt = {
+                margin:       [0.3, 0.3, 0.3, 0.3],
+                filename:     'Gestao_de_Horarios_Diac_SGA.pdf',
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                removeButtons.forEach(btn => btn.style.display = '');
+            }).catch(err => {
+                console.error("Erro ao exportar PDF:", err);
+                removeButtons.forEach(btn => btn.style.display = '');
+            });
+        }
+
+        // Função utilitária para cálculo de tonalidades de bordas
+        function getAdjustedColor(hex, percent) {
+            if (!hex || hex.length < 6) return '#64748b';
+            let num = parseInt(hex.replace('#', ''), 16),
+                amt = Math.round(2.55 * percent),
+                R = (num >> 16) + amt,
+                B = (num >> 8 & 0x00FF) + amt,
+                G = (num & 0x0000FF) + amt;
+
+            return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (B < 255 ? B < 1 ? 0 : B : 255) * 0x100 + (G < 255 ? G < 1 ? 0 : G : 255)).toString(16).slice(1);
+        }
+    </script>
+</body>
+</html>

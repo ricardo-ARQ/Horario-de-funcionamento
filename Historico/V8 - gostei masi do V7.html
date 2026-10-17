@@ -1,0 +1,1345 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Gestão de Horários - Diac/SGA</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+  <style>
+    @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+    body { font-family: 'Inter', sans-serif; }
+    
+    /* Borda tracejada customizada para Trabalho Remoto */
+    .remoto-border {
+      border: 3px dashed #1e293b !important;
+      border-dasharray: 8 4 !important;
+    }
+    
+    .custom-scrollbar::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 4px;
+    }
+    .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800 min-h-screen flex flex-col">
+
+  <!-- TOP HEADER -->
+  <header class="bg-slate-900 text-white shadow-md sticky top-0 z-40">
+    <div class="max-w-7xl mx-auto px-4 py-3 flex justify-between items-center flex-wrap gap-2">
+      <div class="flex items-center space-x-3">
+        <div class="bg-emerald-500 p-2 rounded-lg text-slate-900 font-bold">
+          <i class="fa-solid fa-calendar-days text-xl"></i>
+        </div>
+        <div>
+          <h1 class="font-bold text-lg leading-tight">Gestão de Horários</h1>
+          <p class="text-xs text-slate-400">Diac / SGA - Sistema de Alocação</p>
+        </div>
+      </div>
+
+      <div class="flex items-center space-x-2">
+        <button onclick="toggleModal('modalImportDb')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-file-import text-emerald-400"></i> Importar CSV
+        </button>
+        <button onclick="exportToJson()" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-download text-sky-400"></i> Backup JSON
+        </button>
+        <button onclick="toggleModal('modalImportJson')" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs rounded border border-slate-700 flex items-center gap-1.5 transition">
+          <i class="fa-solid fa-upload text-amber-400"></i> Restaurar
+        </button>
+        <button onclick="exportToPdf()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white font-medium text-xs rounded flex items-center gap-1.5 transition shadow">
+          <i class="fa-solid fa-file-pdf"></i> Exportar PDF
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- SELETOR DE ABAS DE CENÁRIOS E NAVEGAÇÃO MAIN -->
+  <div class="bg-slate-800 border-b border-slate-700">
+    <div class="max-w-7xl mx-auto px-4 flex justify-between items-center overflow-x-auto custom-scrollbar">
+      <div id="sectorTabs" class="flex items-center space-x-1 py-2">
+        <!-- As abas dos setores/cenários serão renderizadas aqui -->
+      </div>
+      <div class="flex items-center space-x-2 py-2">
+        <button onclick="openNewSectorModal()" class="px-3 py-1.5 bg-emerald-700 hover:bg-emerald-600 text-white text-xs rounded flex items-center gap-1 transition whitespace-nowrap">
+          <i class="fa-solid fa-plus"></i> Novo Cenário
+        </button>
+        <button onclick="openDbModal()" class="px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs rounded flex items-center gap-1 transition whitespace-nowrap shadow">
+          <i class="fa-solid fa-database"></i> Base de Servidores (<span id="totalDbCount">0</span>)
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- CONTEÚDO PRINCIPAL -->
+  <main class="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col md:flex-row gap-4">
+    
+    <!-- PAINEL LATERAL: SERVIDORES DO SETOR ATIVO -->
+    <aside class="w-full md:w-80 bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col">
+      <div class="p-3 border-b border-slate-200 bg-slate-50 flex justify-between items-center">
+        <div>
+          <h2 class="font-bold text-sm text-slate-800">Servidores do Setor</h2>
+          <p class="text-xs text-slate-500">Clique para selecionar e aplicar na grade</p>
+        </div>
+        <button onclick="openAddServerToSectorModal()" class="px-2 py-1 bg-slate-800 hover:bg-slate-700 text-white text-xs rounded transition" title="Adicionar Servidor do BD para o Setor">
+          <i class="fa-solid fa-user-plus"></i>
+        </button>
+      </div>
+
+      <!-- Filtro de Servidores por Setor no Painel Lateral -->
+      <div class="p-2 bg-slate-100 border-b border-slate-200 flex items-center gap-2">
+        <i class="fa-solid fa-filter text-slate-400 text-xs ml-1"></i>
+        <select id="sectorPanelFilter" onchange="renderSectorServers()" class="w-full text-xs p-1.5 rounded border border-slate-300 bg-white focus:ring-1 focus:ring-emerald-500">
+          <option value="">Todos os Setores Vinculados</option>
+        </select>
+      </div>
+
+      <!-- Controles de Seleção em Lote do Setor -->
+      <div id="sectorBatchActions" class="p-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs hidden">
+        <span class="text-amber-800 font-medium"><span id="sectorSelectedCount">0</span> selecionado(s)</span>
+        <div class="flex gap-1">
+          <button onclick="clearSelectedFromGrid()" class="px-2 py-0.5 bg-amber-600 hover:bg-amber-700 text-white rounded text-[11px]" title="Remove as alocações da grade dos servidores selecionados">
+            🧹 Limpar Grade
+          </button>
+          <button onclick="deleteSelectedFromSector()" class="px-2 py-0.5 bg-rose-600 hover:bg-rose-700 text-white rounded text-[11px]" title="Remove do setor">
+            🗑️ Remover
+          </button>
+        </div>
+      </div>
+
+      <!-- Cabeçalho Seleção em Lote -->
+      <div class="px-3 py-1.5 border-b border-slate-100 flex justify-between items-center text-xs bg-slate-50">
+        <label class="flex items-center gap-1.5 cursor-pointer text-slate-600">
+          <input type="checkbox" id="selectAllSectorCheckbox" onchange="toggleSelectAllSector(this.checked)" class="rounded text-emerald-600 focus:ring-emerald-500">
+          <span class="font-medium">Selecionar Todos</span>
+        </label>
+        <span class="text-slate-400 text-[11px]" id="sectorCountBadge">0 servidores</span>
+      </div>
+
+      <!-- LISTA DE SERVIDORES DO SETOR -->
+      <div id="sectorServerList" class="p-2 flex-1 overflow-y-auto space-y-2 max-h-[calc(100vh-280px)] custom-scrollbar">
+        <!-- Cards dos servidores renderizados aqui -->
+      </div>
+
+      <!-- PINCEL ATIVO / STATUS -->
+      <div id="brushStatus" class="p-3 border-t border-slate-200 bg-emerald-50 hidden flex flex-col gap-1">
+        <div class="flex justify-between items-center">
+          <span class="text-xs font-bold text-emerald-800 flex items-center gap-1">
+            <i class="fa-solid fa-paint-brush"></i> MODO PINCEL ATIVO
+          </span>
+          <button onclick="clearBrush()" class="text-xs text-rose-600 hover:underline">Cancelar (ESC)</button>
+        </div>
+        <p class="text-[11px] text-emerald-700" id="brushInfo">Servidor selecionado: ...</p>
+      </div>
+    </aside>
+
+    <!-- ÁREA PRINCIPAL DA GRADE DE HORÁRIOS -->
+    <section class="flex-1 bg-white rounded-lg shadow-sm border border-slate-200 flex flex-col p-4">
+      
+      <!-- CONTROLES SUPERIORES DA GRADE -->
+      <div class="flex flex-wrap justify-between items-center gap-3 pb-4 border-b border-slate-200">
+        <div>
+          <h2 class="font-bold text-slate-800 text-base" id="currentSectorTitle">Cenário Padrão</h2>
+          <p class="text-xs text-slate-500">Aloque os servidores nos horários abaixo</p>
+        </div>
+
+        <div class="flex items-center flex-wrap gap-2">
+          <!-- SELETOR DE GRANULARIDADE DE TEMPO -->
+          <div class="bg-slate-100 p-1 rounded-lg flex items-center border border-slate-300">
+            <span class="text-xs text-slate-600 px-2 font-medium">Intervalo:</span>
+            <button onclick="setGranularity(30)" id="btnGran30" class="px-2 py-1 text-xs font-semibold rounded transition bg-white text-slate-800 shadow">30 min</button>
+            <button onclick="setGranularity(45)" id="btnGran45" class="px-2 py-1 text-xs font-semibold rounded transition text-slate-600 hover:text-slate-900">45 min</button>
+            <button onclick="setGranularity(60)" id="btnGran60" class="px-2 py-1 text-xs font-semibold rounded transition text-slate-600 hover:text-slate-900">1 h</button>
+          </div>
+
+          <!-- MODO DE TRABALHO -->
+          <div class="flex items-center bg-slate-100 p-1 rounded-lg border border-slate-300 text-xs">
+            <label class="flex items-center gap-1 cursor-pointer px-2">
+              <input type="radio" name="workMode" value="PRESENCIAL" checked onchange="setWorkMode('PRESENCIAL')" class="text-emerald-600">
+              <span class="font-medium">Presencial</span>
+            </label>
+            <label class="flex items-center gap-1 cursor-pointer px-2 border-l border-slate-300">
+              <input type="radio" name="workMode" value="REMOTO" onchange="setWorkMode('REMOTO')" class="text-emerald-600">
+              <span class="font-medium text-slate-700 flex items-center gap-1">
+                Remoto <span class="inline-block w-3 h-2 border border-dashed border-slate-800"></span>
+              </span>
+            </label>
+          </div>
+
+          <!-- AÇÕES RÁPIDAS DA GRADE -->
+          <button onclick="insertIntervalBlocks()" class="px-2.5 py-1.5 bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300 rounded text-xs font-medium transition" title="Inserir Intervalos Padrão (12h-13h e 18h-18:45)">
+            <i class="fa-solid fa-mug-hot"></i> Restaurar Intervalos
+          </button>
+          <button onclick="clearCurrentGrid()" class="px-2.5 py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 rounded text-xs font-medium transition">
+            <i class="fa-solid fa-eraser"></i> Limpar Grade
+          </button>
+        </div>
+      </div>
+
+      <!-- LEGENDA DE MODOS -->
+      <div class="py-2 flex items-center gap-4 text-xs text-slate-500 border-b border-slate-100">
+        <span class="flex items-center gap-1">
+          <span class="w-4 h-4 bg-emerald-500 rounded inline-block"></span> Presencial
+        </span>
+        <span class="flex items-center gap-1">
+          <span class="w-4 h-4 bg-emerald-500 rounded inline-block remoto-border"></span> Remoto (Borda Tracejada)
+        </span>
+        <span class="flex items-center gap-1">
+          <span class="w-4 h-4 bg-slate-300 rounded inline-block"></span> Intervalo (Transição de Turno)
+        </span>
+      </div>
+
+      <!-- CONTAINER DA GRADE TABULAR (PDF ELEMENT) -->
+      <div id="gridPdfContainer" class="flex-1 overflow-x-auto mt-3 custom-scrollbar">
+        <table class="w-full text-left border-collapse border border-slate-200 text-xs">
+          <thead>
+            <tr class="bg-slate-800 text-white">
+              <th class="p-2 border border-slate-700 w-28 text-center">Horário</th>
+              <th class="p-2 border border-slate-700 text-center">Segunda</th>
+              <th class="p-2 border border-slate-700 text-center">Terça</th>
+              <th class="p-2 border border-slate-700 text-center">Quarta</th>
+              <th class="p-2 border border-slate-700 text-center">Quinta</th>
+              <th class="p-2 border border-slate-700 text-center">Sexta</th>
+            </tr>
+          </thead>
+          <tbody id="gridTbody">
+            <!-- Linhas da grade geradas dinamicamente -->
+          </tbody>
+        </table>
+      </div>
+
+    </section>
+
+  </main>
+
+  <!-- MODAL: BASE DE DADOS GLOBAL DE SERVIDORES -->
+  <div id="modalDb" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <div class="flex items-center gap-2">
+          <i class="fa-solid fa-database text-emerald-400"></i>
+          <h3 class="font-bold text-lg">Base de Dados de Servidores</h3>
+        </div>
+        <button onclick="toggleModal('modalDb')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+
+      <!-- Barra de Filtros e Adição DB -->
+      <div class="p-3 bg-slate-100 border-b border-slate-200 flex flex-wrap justify-between items-center gap-2">
+        <div class="flex items-center gap-2 flex-1 min-w-[240px]">
+          <input type="text" id="dbSearchInput" onkeyup="renderDbTable()" placeholder="Buscar servidor por nome, matrícula, disciplina..." class="w-full px-3 py-1.5 text-xs rounded border border-slate-300 focus:ring-1 focus:ring-emerald-500">
+          <select id="dbSectorFilter" onchange="renderDbTable()" class="px-3 py-1.5 text-xs rounded border border-slate-300 bg-white focus:ring-1 focus:ring-emerald-500">
+            <option value="">Todos os Setores</option>
+          </select>
+        </div>
+
+        <div class="flex items-center gap-2">
+          <button onclick="openNewServerDbModal()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-medium rounded transition flex items-center gap-1">
+            <i class="fa-solid fa-user-plus"></i> Novo Servidor
+          </button>
+        </div>
+      </div>
+
+      <!-- Ações em Lote DB -->
+      <div id="dbBatchActions" class="p-2 bg-amber-50 border-b border-amber-200 flex items-center justify-between text-xs hidden">
+        <span class="text-amber-900 font-medium"><span id="dbSelectedCount">0</span> servidor(es) selecionado(s)</span>
+        <button onclick="deleteSelectedDbServers()" class="px-3 py-1 bg-rose-600 hover:bg-rose-700 text-white rounded text-xs font-semibold flex items-center gap-1 transition">
+          <i class="fa-solid fa-trash-can"></i> Apagar Selecionados
+        </button>
+      </div>
+
+      <!-- Tabela DB -->
+      <div class="flex-1 overflow-auto p-4 custom-scrollbar">
+        <table class="w-full text-xs text-left border-collapse">
+          <thead>
+            <tr class="bg-slate-200 text-slate-700 uppercase font-semibold">
+              <th class="p-2 border border-slate-300 text-center w-10">
+                <input type="checkbox" id="selectAllDbCheckbox" onchange="toggleSelectAllDb(this.checked)" class="rounded text-emerald-600 focus:ring-emerald-500">
+              </th>
+              <th class="p-2 border border-slate-300">Nome Fantasia / Completo</th>
+              <th class="p-2 border border-slate-300">Matrícula</th>
+              <th class="p-2 border border-slate-300">Disciplina / Função</th>
+              <th class="p-2 border border-slate-300">Titulação</th>
+              <th class="p-2 border border-slate-300 text-center">C.H.</th>
+              <th class="p-2 border border-slate-300 text-center">Setor Vinculado</th>
+              <th class="p-2 border border-slate-300 text-center">Cor</th>
+              <th class="p-2 border border-slate-300 text-center">Ações</th>
+            </tr>
+          </thead>
+          <tbody id="dbTableBody" class="divide-y divide-slate-200">
+            <!-- Servidores cadastrados renderizados aqui -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="p-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs text-slate-500">
+        <span>Total de Servidores na Base: <b id="dbModalTotalCount">0</b></span>
+        <button onclick="toggleModal('modalDb')" class="px-4 py-1.5 bg-slate-300 hover:bg-slate-400 text-slate-800 rounded font-medium">Fechar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: CADASTRAR/EDITAR SERVIDOR NO BANCO -->
+  <div id="modalServerForm" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 id="serverFormTitle" class="font-bold text-base">Cadastrar Servidor</h3>
+        <button onclick="toggleModal('modalServerForm')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <form id="serverForm" onsubmit="saveServerForm(event)" class="p-4 space-y-3 text-xs">
+        <input type="hidden" id="serverId">
+        
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Nome Fantasia (Abreviação para a Grade)*</label>
+          <input type="text" id="serverShortName" required placeholder="Ex: Prof. Silva" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Nome Completo*</label>
+          <input type="text" id="serverFullName" required placeholder="Ex: João da Silva Santos" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Matrícula SIAPE</label>
+            <input type="text" id="serverMatricula" placeholder="1234567" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Carga Horária (C.H.)</label>
+            <input type="text" id="serverCh" placeholder="Ex: 40h / DE" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+          </div>
+        </div>
+
+        <div class="grid grid-cols-2 gap-2">
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Disciplina / Função</label>
+            <input type="text" id="serverRole" placeholder="Ex: Informática" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+          </div>
+          <div>
+            <label class="block font-semibold text-slate-700 mb-1">Titulação</label>
+            <input type="text" id="serverDegree" placeholder="Ex: Mestre / Doutor" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+          </div>
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Setor de Vinculação</label>
+          <input type="text" id="serverSector" placeholder="Ex: DIAC, COAN, COEN, DADP..." class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Cor do Card na Grade</label>
+          <div class="flex items-center gap-2">
+            <input type="color" id="serverColor" value="#10b981" class="h-9 w-14 rounded border border-slate-300 cursor-pointer">
+            <span class="text-slate-500">Escolha uma cor marcante</span>
+          </div>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" onclick="toggleModal('modalServerForm')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-medium hover:bg-slate-300">Cancelar</button>
+          <button type="submit" class="px-4 py-2 bg-emerald-600 text-white rounded font-medium hover:bg-emerald-500">Salvar Servidor</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: ADICIONAR SERVIDOR DO BANCO PARA O SETOR ATIVO -->
+  <div id="modalAddServerToSector" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-base">Vincular Servidor ao Cenário</h3>
+        <button onclick="toggleModal('modalAddServerToSector')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div class="p-4 space-y-3 text-xs">
+        <p class="text-slate-600">Selecione um servidor cadastrado no banco global para atuar neste setor:</p>
+        <select id="selectDbServerToSector" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500 text-xs">
+          <!-- Opções preenchidas dinamicamente -->
+        </select>
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" onclick="toggleModal('modalAddServerToSector')" class="px-3 py-1.5 bg-slate-200 text-slate-700 rounded font-medium">Cancelar</button>
+          <button type="button" onclick="confirmAddServerToSector()" class="px-3 py-1.5 bg-emerald-600 text-white rounded font-medium hover:bg-emerald-500">Adicionar</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: NOVO CENÁRIO / SETOR -->
+  <div id="modalNewSector" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-base">Novo Cenário / Setor</h3>
+        <button onclick="toggleModal('modalNewSector')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <form onsubmit="saveNewSector(event)" class="p-4 space-y-3 text-xs">
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Nome do Setor / Cenário*</label>
+          <input type="text" id="newSectorName" required placeholder="Ex: DIAC - Manhã, COAN, etc." class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+        </div>
+
+        <div>
+          <label class="block font-semibold text-slate-700 mb-1">Povoamento Inicial da Equipe</label>
+          <select id="newSectorImportOption" class="w-full p-2 border border-slate-300 rounded focus:ring-1 focus:ring-emerald-500">
+            <option value="EMPTY">Criar cenário vazio</option>
+            <option value="FILTER_SETOR">Importar apenas servidores com o mesmo nome de Setor</option>
+            <option value="ALL_DB">Importar TODOS os servidores do Banco de Dados</option>
+          </select>
+        </div>
+
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button type="button" onclick="toggleModal('modalNewSector')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-medium">Cancelar</button>
+          <button type="submit" class="px-4 py-2 bg-emerald-600 text-white rounded font-medium hover:bg-emerald-500">Criar Cenário</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- MODAL: IMPORTAR CSV BANCO DE DADOS -->
+  <div id="modalImportDb" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-base">Importar Servidores (CSV / Excel)</h3>
+        <button onclick="toggleModal('modalImportDb')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div class="p-4 space-y-3 text-xs">
+        <p class="text-slate-600">Selecione um arquivo CSV com cabeçalhos: <code class="bg-slate-100 p-1 rounded font-mono">NomeFantasia, NomeCompleto, Matricula, Disciplina, Titulacao, CH, Setor</code></p>
+        <input type="file" id="csvFileInput" accept=".csv" class="w-full p-2 border border-slate-300 rounded">
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="toggleModal('modalImportDb')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-medium">Cancelar</button>
+          <button onclick="processCsvImport()" class="px-4 py-2 bg-emerald-600 text-white rounded font-medium hover:bg-emerald-500">Importar Dados</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: RESTAURAR JSON -->
+  <div id="modalImportJson" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden">
+    <div class="bg-white rounded-xl shadow-2xl w-full max-w-lg overflow-hidden m-4">
+      <div class="p-4 bg-slate-900 text-white flex justify-between items-center">
+        <h3 class="font-bold text-base">Restaurar Backup Completo (JSON)</h3>
+        <button onclick="toggleModal('modalImportJson')" class="text-slate-400 hover:text-white text-xl">&times;</button>
+      </div>
+      <div class="p-4 space-y-3 text-xs">
+        <p class="text-slate-600">Selecione o arquivo de backup <code class="bg-slate-100 p-1 rounded font-mono">.json</code> gerado anteriormente para substituir o estado atual do sistema.</p>
+        <input type="file" id="jsonFileInput" accept=".json" class="w-full p-2 border border-slate-300 rounded">
+        <div class="pt-3 border-t border-slate-200 flex justify-end gap-2">
+          <button onclick="toggleModal('modalImportJson')" class="px-4 py-2 bg-slate-200 text-slate-700 rounded font-medium">Cancelar</button>
+          <button onclick="processJsonImport()" class="px-4 py-2 bg-amber-600 text-white rounded font-medium hover:bg-amber-500">Restaurar Estado</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- JAVASCRIPT LÓGICA DA APLICAÇÃO -->
+  <script>
+    // --- ESTADO GLOBAL DO SISTEMA ---
+    const STORAGE_KEY = "DIAC_SGA_HORARIOS_STATE_V3";
+
+    let state = {
+      // Base global de servidores
+      dbServers: [],
+      // Múltiplos setores/cenários
+      sectors: [
+        { id: "sec_1", name: "DIAC - Geral", serverIds: [], grid: {} }
+      ],
+      activeSectorId: "sec_1",
+      // Granularidade: 30, 45, ou 60 minutos
+      granularity: 30,
+      // Modo ativo de trabalho: PRESENCIAL ou REMOTO
+      currentWorkMode: "PRESENCIAL"
+    };
+
+    // Servidor selecionado no Pincel
+    let activeBrushServer = null; 
+
+    // --- DIAS E HORÁRIOS PADRÃO ---
+    const DAYS = ["segunda", "terca", "quarta", "quinta", "sexta"];
+
+    // Inicialização da Aplicação
+    window.addEventListener("DOMContentLoaded", () => {
+      loadState();
+      // Se não houver servidores na base, insere alguns de exemplo
+      if (state.dbServers.length === 0) {
+        initDefaultDbServers();
+      }
+      // Se o setor inicial estiver sem servidores, insere os de exemplo
+      const currentSec = getCurrentSector();
+      if (currentSec && currentSec.serverIds.length === 0) {
+        currentSec.serverIds = state.dbServers.map(s => s.id);
+      }
+      // Insere blocos de intervalo por padrão se estiver limpo
+      if (Object.keys(currentSec.grid).length === 0) {
+        insertIntervalBlocks();
+      }
+
+      setupEventListeners();
+      renderAll();
+    });
+
+    function setupEventListeners() {
+      // Tecla ESC para cancelar o pincel
+      document.addEventListener("keydown", (e) => {
+        if (e.key === "Escape") {
+          clearBrush();
+        }
+      });
+    }
+
+    // --- GERENCIAMENTO DE ESTADO / LOCALSTORAGE ---
+    function saveState() {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    }
+
+    function loadState() {
+      const saved = localStorage.getItem(STORAGE_KEY);
+      if (saved) {
+        try {
+          state = JSON.parse(saved);
+        } catch(e) {
+          console.error("Erro ao carregar estado do localStorage", e);
+        }
+      }
+    }
+
+    function getCurrentSector() {
+      return state.sectors.find(s => s.id === state.activeSectorId) || state.sectors[0];
+    }
+
+    function initDefaultDbServers() {
+      state.dbServers = [
+        { id: "srv_1", shortName: "Prof. Carlos", fullName: "Carlos Eduardo Santos", matricula: "1092837", role: "Matemática", degree: "Doutor", ch: "40h DE", sector: "DIAC", color: "#0284c7" },
+        { id: "srv_2", shortName: "Profª. Maria", fullName: "Maria Aparecida Silva", matricula: "1827364", role: "História", degree: "Mestre", ch: "40h DE", sector: "COAN", color: "#e11d48" },
+        { id: "srv_3", shortName: "Prof. André", fullName: "André Luiz Souza", matricula: "1928374", role: "Informática", degree: "Mestre", ch: "20h", sector: "DIAC", color: "#16a34a" },
+        { id: "srv_4", shortName: "Tec. Fernanda", fullName: "Fernanda Costa Lima", matricula: "2039481", role: "Assistente em Administração", degree: "Especialista", ch: "40h", sector: "DADP", color: "#d97706" }
+      ];
+      saveState();
+    }
+
+    // --- GERAÇÃO DE HORÁRIOS DA GRADE ---
+    function generateTimeSlots(granularity) {
+      const slots = [];
+      let currentMinutes = 7 * 60; // 07:00
+      const endMinutes = 22 * 60;   // 22:00
+
+      while (currentMinutes < endMinutes) {
+        const startH = String(Math.floor(currentMinutes / 60)).padStart(2, '0');
+        const startM = String(currentMinutes % 60).padStart(2, '0');
+        
+        let nextMinutes = currentMinutes + granularity;
+        if (nextMinutes > endMinutes) nextMinutes = endMinutes;
+
+        const endH = String(Math.floor(nextMinutes / 60)).padStart(2, '0');
+        const endM = String(nextMinutes % 60).padStart(2, '0');
+
+        slots.push({
+          label: `${startH}:${startM} - ${endH}:${endM}`,
+          startMinutes: currentMinutes,
+          endMinutes: nextMinutes
+        });
+
+        currentMinutes = nextMinutes;
+      }
+      return slots;
+    }
+
+    // --- PREENCHIMENTO AUTOMÁTICO DE INTERVALOS (12h-13h e 18h-18:45) ---
+    function insertIntervalBlocks() {
+      const sec = getCurrentSector();
+      const slots = generateTimeSlots(state.granularity);
+
+      slots.forEach(slot => {
+        // Intervalo do Almoço (entre 12:00 e 13:00)
+        const isLunch = (slot.startMinutes >= 12 * 60 && slot.endMinutes <= 13 * 60);
+        // Intervalo do Fim de Tarde (entre 18:00 e 18:45/19:00)
+        const isDinner = (slot.startMinutes >= 18 * 60 && slot.endMinutes <= 19 * 60 && slot.startMinutes < 18 * 60 + 45);
+
+        if (isLunch || isDinner) {
+          DAYS.forEach(day => {
+            const key = `${day}_${slot.label}`;
+            // Preenche como INTERVALO de transição
+            sec.grid[key] = {
+              isInterval: true,
+              text: "INTERVALO",
+              mode: "PRESENCIAL"
+            };
+          });
+        }
+      });
+
+      saveState();
+      renderGrid();
+    }
+
+    // --- RENDERIZAÇÃO GERAL ---
+    function renderAll() {
+      renderSectorTabs();
+      renderSectorPanel();
+      renderGrid();
+      renderDbTable();
+      updateSectorsFilterSelects();
+      
+      // Atualiza botões de granularidade
+      document.getElementById("btnGran30").className = state.granularity === 30 ? "px-2 py-1 text-xs font-semibold rounded transition bg-white text-slate-800 shadow" : "px-2 py-1 text-xs font-semibold rounded transition text-slate-600 hover:text-slate-900";
+      document.getElementById("btnGran45").className = state.granularity === 45 ? "px-2 py-1 text-xs font-semibold rounded transition bg-white text-slate-800 shadow" : "px-2 py-1 text-xs font-semibold rounded transition text-slate-600 hover:text-slate-900";
+      document.getElementById("btnGran60").className = state.granularity === 60 ? "px-2 py-1 text-xs font-semibold rounded transition bg-white text-slate-800 shadow" : "px-2 py-1 text-xs font-semibold rounded transition text-slate-600 hover:text-slate-900";
+
+      document.getElementById("totalDbCount").innerText = state.dbServers.length;
+    }
+
+    // --- RENDERIZAR ABAS DE SETORES/CENÁRIOS ---
+    function renderSectorTabs() {
+      const container = document.getElementById("sectorTabs");
+      container.innerHTML = "";
+
+      state.sectors.forEach(sec => {
+        const isActive = sec.id === state.activeSectorId;
+        const btn = document.createElement("div");
+        btn.className = `flex items-center gap-2 px-3 py-1.5 rounded-t font-medium text-xs cursor-pointer transition ${
+          isActive 
+            ? "bg-white text-slate-900 border-t-2 border-emerald-500 shadow-sm" 
+            : "text-slate-300 hover:bg-slate-700 hover:text-white"
+        }`;
+        
+        btn.onclick = () => {
+          state.activeSectorId = sec.id;
+          clearBrush();
+          saveState();
+          renderAll();
+        };
+
+        btn.innerHTML = `
+          <span><i class="fa-solid fa-layer-group text-[10px] mr-1"></i>${sec.name}</span>
+          ${state.sectors.length > 1 ? `<button onclick="deleteSector('${sec.id}', event)" class="hover:text-rose-500 text-slate-400 font-bold ml-1">&times;</button>` : ""}
+        `;
+
+        container.appendChild(btn);
+      });
+    }
+
+    function openNewSectorModal() {
+      toggleModal("modalNewSector");
+    }
+
+    function saveNewSector(e) {
+      e.preventDefault();
+      const name = document.getElementById("newSectorName").value.trim();
+      const importOption = document.getElementById("newSectorImportOption").value;
+      if (!name) return;
+
+      const newId = "sec_" + Date.now();
+      let initialServerIds = [];
+
+      if (importOption === "ALL_DB") {
+        initialServerIds = state.dbServers.map(s => s.id);
+      } else if (importOption === "FILTER_SETOR") {
+        initialServerIds = state.dbServers
+          .filter(s => s.sector && s.sector.toLowerCase() === name.toLowerCase())
+          .map(s => s.id);
+      }
+
+      const newSec = {
+        id: newId,
+        name: name,
+        serverIds: initialServerIds,
+        grid: {}
+      };
+
+      state.sectors.push(newSec);
+      state.activeSectorId = newId;
+      
+      saveState();
+      // Insere os intervalos na nova grade por padrão
+      insertIntervalBlocks();
+
+      toggleModal("modalNewSector");
+      document.getElementById("newSectorName").value = "";
+      renderAll();
+    }
+
+    function deleteSector(secId, e) {
+      e.stopPropagation();
+      if (state.sectors.length <= 1) {
+        alert("É necessário manter ao menos um cenário/setor ativo.");
+        return;
+      }
+      if (confirm("Deseja realmente remover este cenário/setor? Toda a grade deste setor será apagada.")) {
+        state.sectors = state.sectors.filter(s => s.id !== secId);
+        if (state.activeSectorId === secId) {
+          state.activeSectorId = state.sectors[0].id;
+        }
+        saveState();
+        renderAll();
+      }
+    }
+
+    // --- PAINEL LATERAL: SERVIDORES DO SETOR ATIVO ---
+    function renderSectorPanel() {
+      const sec = getCurrentSector();
+      document.getElementById("currentSectorTitle").innerText = sec.name;
+
+      renderSectorServers();
+    }
+
+    function renderSectorServers() {
+      const sec = getCurrentSector();
+      const listContainer = document.getElementById("sectorServerList");
+      listContainer.innerHTML = "";
+
+      const filterVal = document.getElementById("sectorPanelFilter").value;
+
+      // Obtém dados dos servidores vinculados ao setor ativo
+      let sectorServers = state.dbServers.filter(s => sec.serverIds.includes(s.id));
+
+      if (filterVal) {
+        sectorServers = sectorServers.filter(s => (s.sector || "") === filterVal);
+      }
+
+      document.getElementById("sectorCountBadge").innerText = `${sectorServers.length} servidor(es)`;
+
+      if (sectorServers.length === 0) {
+        listContainer.innerHTML = `<p class="text-xs text-slate-400 text-center py-4">Nenhum servidor vinculado a este cenário.</p>`;
+        return;
+      }
+
+      sectorServers.forEach(srv => {
+        const isSelectedBrush = activeBrushServer && activeBrushServer.id === srv.id;
+        
+        const card = document.createElement("div");
+        card.className = `p-2.5 rounded-lg border transition cursor-pointer flex items-center justify-between ${
+          isSelectedBrush 
+            ? "border-emerald-500 ring-2 ring-emerald-400 bg-emerald-50 shadow-md" 
+            : "border-slate-200 bg-white hover:border-slate-300 hover:shadow-sm"
+        }`;
+
+        card.innerHTML = `
+          <div class="flex items-center gap-2 overflow-hidden">
+            <input type="checkbox" class="sector-checkbox rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer" value="${srv.id}" onclick="event.stopPropagation(); updateSectorBatchUI();">
+            <div class="w-3 h-8 rounded-full flex-shrink-0" style="background-color: ${srv.color || '#10b981'}"></div>
+            <div class="truncate" onclick="selectServerBrush('${srv.id}')">
+              <h4 class="font-bold text-xs text-slate-800 truncate">${srv.shortName}</h4>
+              <p class="text-[10px] text-slate-500 truncate">${srv.fullName} (${srv.matricula || 'S/M'})</p>
+              <div class="flex gap-1 items-center text-[9px] text-slate-400 mt-0.5">
+                <span class="bg-slate-100 px-1 rounded">${srv.role || 'Geral'}</span>
+                <span class="bg-slate-100 px-1 rounded">${srv.sector || 'S/S'}</span>
+              </div>
+            </div>
+          </div>
+          <div class="flex items-center gap-1">
+            <button onclick="event.stopPropagation(); removeServerFromSector('${srv.id}')" class="text-slate-400 hover:text-rose-600 p-1 text-xs" title="Remover do Setor">
+              <i class="fa-solid fa-times"></i>
+            </button>
+          </div>
+        `;
+
+        listContainer.appendChild(card);
+      });
+
+      updateSectorBatchUI();
+    }
+
+    // --- SELEÇÃO EM LOTE DO SETOR LATERAL ---
+    function toggleSelectAllSector(checked) {
+      const checkboxes = document.querySelectorAll(".sector-checkbox");
+      checkboxes.forEach(cb => cb.checked = checked);
+      updateSectorBatchUI();
+    }
+
+    function updateSectorBatchUI() {
+      const checkboxes = document.querySelectorAll(".sector-checkbox:checked");
+      const count = checkboxes.length;
+      const batchBox = document.getElementById("sectorBatchActions");
+      const countSpan = document.getElementById("sectorSelectedCount");
+
+      if (count > 0) {
+        batchBox.classList.remove("hidden");
+        countSpan.innerText = count;
+      } else {
+        batchBox.classList.add("hidden");
+      }
+    }
+
+    function clearSelectedFromGrid() {
+      const checkedBoxes = document.querySelectorAll(".sector-checkbox:checked");
+      const selectedIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+      if (selectedIds.length === 0) return;
+
+      if (confirm(`Deseja remover todas as alocações da grade para os ${selectedIds.length} servidor(es) selecionados?`)) {
+        const sec = getCurrentSector();
+        Object.keys(sec.grid).forEach(key => {
+          if (sec.grid[key] && selectedIds.includes(sec.grid[key].serverId)) {
+            delete sec.grid[key];
+          }
+        });
+        saveState();
+        renderGrid();
+      }
+    }
+
+    function deleteSelectedFromSector() {
+      const checkedBoxes = document.querySelectorAll(".sector-checkbox:checked");
+      const selectedIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+      if (selectedIds.length === 0) return;
+
+      if (confirm(`Deseja remover estes ${selectedIds.length} servidor(es) deste cenário?`)) {
+        const sec = getCurrentSector();
+        sec.serverIds = sec.serverIds.filter(id => !selectedIds.includes(id));
+        saveState();
+        renderSectorPanel();
+      }
+    }
+
+    // --- MODAL DE ADICIONAR SERVIDOR DO BANCO PARA O SETOR ---
+    function openAddServerToSectorModal() {
+      const sec = getCurrentSector();
+      const select = document.getElementById("selectDbServerToSector");
+      select.innerHTML = "";
+
+      // Filtra servidores que ainda NÃO estão neste setor
+      const available = state.dbServers.filter(s => !sec.serverIds.includes(s.id));
+
+      if (available.length === 0) {
+        select.innerHTML = `<option value="">Todos os servidores da base já estão neste setor!</option>`;
+      } else {
+        available.forEach(s => {
+          select.innerHTML += `<option value="${s.id}">${s.shortName} - ${s.fullName} (${s.sector || 'Sem Setor'})</option>`;
+        });
+      }
+
+      toggleModal("modalAddServerToSector");
+    }
+
+    function confirmAddServerToSector() {
+      const srvId = document.getElementById("selectDbServerToSector").value;
+      if (!srvId) return;
+
+      const sec = getCurrentSector();
+      if (!sec.serverIds.includes(srvId)) {
+        sec.serverIds.push(srvId);
+        saveState();
+        renderSectorPanel();
+      }
+      toggleModal("modalAddServerToSector");
+    }
+
+    function removeServerFromSector(srvId) {
+      const sec = getCurrentSector();
+      sec.serverIds = sec.serverIds.filter(id => id !== srvId);
+      saveState();
+      renderSectorPanel();
+    }
+
+    // --- MODO PINCEL DE PREENCHIMENTO RÁPIDO ---
+    function selectServerBrush(srvId) {
+      const srv = state.dbServers.find(s => s.id === srvId);
+      if (!srv) return;
+
+      activeBrushServer = srv;
+      document.getElementById("brushStatus").classList.remove("hidden");
+      document.getElementById("brushInfo").innerText = `Servidor selecionado: ${srv.shortName} (${srv.role || 'Geral'})`;
+      renderSectorServers();
+    }
+
+    function clearBrush() {
+      activeBrushServer = null;
+      document.getElementById("brushStatus").classList.add("hidden");
+      renderSectorServers();
+    }
+
+    function setWorkMode(mode) {
+      state.currentWorkMode = mode;
+    }
+
+    function setGranularity(gran) {
+      state.granularity = gran;
+      saveState();
+      renderAll();
+    }
+
+    // --- RENDERIZAÇÃO DA GRADE SEMANAL ---
+    function renderGrid() {
+      const tbody = document.getElementById("gridTbody");
+      tbody.innerHTML = "";
+
+      const slots = generateTimeSlots(state.granularity);
+      const sec = getCurrentSector();
+
+      slots.forEach(slot => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50 transition border-b border-slate-200";
+
+        // Coluna do Horário
+        const tdTime = document.createElement("td");
+        tdTime.className = "p-2 border border-slate-200 font-bold text-center text-[11px] bg-slate-100 text-slate-700 whitespace-nowrap";
+        tdTime.innerText = slot.label;
+        tr.appendChild(tdTime);
+
+        // Colunas dos Dias da Semana
+        DAYS.forEach(day => {
+          const td = document.createElement("td");
+          td.className = "p-1 border border-slate-200 h-12 min-w-[120px] relative cursor-pointer align-top select-none transition hover:bg-emerald-50/50";
+          
+          const key = `${day}_${slot.label}`;
+          const cellData = sec.grid[key];
+
+          if (cellData) {
+            if (cellData.isInterval) {
+              // BLOCO DE INTERVALO
+              td.innerHTML = `
+                <div class="w-full h-full p-1.5 rounded bg-slate-200 text-slate-700 font-semibold text-[11px] flex items-center justify-between group shadow-inner">
+                  <span class="truncate"><i class="fa-solid fa-mug-hot text-[10px] mr-1 text-slate-500"></i>${cellData.text || 'INTERVALO'}</span>
+                  <button onclick="event.stopPropagation(); removeGridCell('${key}')" class="opacity-0 group-hover:opacity-100 text-rose-600 hover:text-rose-800 text-xs font-bold transition">&times;</button>
+                </div>
+              `;
+            } else {
+              // ALOCAÇÃO DE SERVIDOR
+              const srv = state.dbServers.find(s => s.id === cellData.serverId);
+              if (srv) {
+                const isRemoto = cellData.mode === "REMOTO";
+                const bgColor = srv.color || "#10b981";
+                const textColor = getContrastColor(bgColor);
+
+                td.innerHTML = `
+                  <div class="w-full h-full p-1.5 rounded flex flex-col justify-between shadow-sm transition group relative ${isRemoto ? 'remoto-border' : ''}" style="background-color: ${bgColor}; color: ${textColor};">
+                    <div class="flex justify-between items-start">
+                      <span class="font-bold text-xs truncate leading-tight">${srv.shortName}</span>
+                      <button onclick="event.stopPropagation(); removeGridCell('${key}')" class="opacity-0 group-hover:opacity-100 hover:bg-black/20 rounded px-1 text-xs font-bold transition">&times;</button>
+                    </div>
+                    <div class="flex justify-between items-center text-[9px] mt-1 opacity-90">
+                      <span class="truncate">${srv.role || 'Geral'}</span>
+                      <span class="font-semibold px-1 rounded ${isRemoto ? 'bg-slate-900 text-white' : 'bg-black/20'}">${cellData.mode || 'PRES'}</span>
+                    </div>
+                  </div>
+                `;
+              }
+            }
+          }
+
+          // Clique na Célula
+          td.onclick = () => handleCellClick(key);
+
+          tr.appendChild(td);
+        });
+
+        tbody.appendChild(tr);
+      });
+    }
+
+    function handleCellClick(key) {
+      const sec = getCurrentSector();
+
+      if (activeBrushServer) {
+        // Se houver servidor selecionado no Pincel, insere-o na célula
+        sec.grid[key] = {
+          serverId: activeBrushServer.id,
+          mode: state.currentWorkMode
+        };
+      } else {
+        // Se NÃO houver pincel, abre menu rápido ou remove se já houver alocação
+        if (sec.grid[key]) {
+          delete sec.grid[key];
+        } else {
+          // Inserção rápida do primeiro servidor do setor
+          if (sec.serverIds.length > 0) {
+            sec.grid[key] = {
+              serverId: sec.serverIds[0],
+              mode: state.currentWorkMode
+            };
+          }
+        }
+      }
+
+      saveState();
+      renderGrid();
+    }
+
+    function removeGridCell(key) {
+      const sec = getCurrentSector();
+      delete sec.grid[key];
+      saveState();
+      renderGrid();
+    }
+
+    function clearCurrentGrid() {
+      if (confirm("Deseja realmente limpar todas as alocações da grade deste cenário?")) {
+        const sec = getCurrentSector();
+        sec.grid = {};
+        saveState();
+        renderGrid();
+      }
+    }
+
+    // --- CÁLCULO DE CONTRASTE DE COR DA FONTE ---
+    function getContrastColor(hexColor) {
+      if (!hexColor || hexColor.charAt(0) !== '#') return '#ffffff';
+      const r = parseInt(hexColor.substr(1, 2), 16);
+      const g = parseInt(hexColor.substr(3, 2), 16);
+      const b = parseInt(hexColor.substr(5, 2), 16);
+      const yiq = ((r * 299) + (g * 587) + (b * 114)) / 1000;
+      return (yiq >= 128) ? '#1e293b' : '#ffffff';
+    }
+
+    // --- GERENCIAMENTO DA BASE DE DADOS GLOBAL DE SERVIDORES ---
+    function openDbModal() {
+      renderDbTable();
+      toggleModal("modalDb");
+    }
+
+    function renderDbTable() {
+      const tbody = document.getElementById("dbTableBody");
+      tbody.innerHTML = "";
+
+      const searchVal = document.getElementById("dbSearchInput").value.toLowerCase();
+      const sectorVal = document.getElementById("dbSectorFilter").value;
+
+      let filtered = state.dbServers.filter(s => {
+        const matchesSearch = s.shortName.toLowerCase().includes(searchVal) ||
+                              s.fullName.toLowerCase().includes(searchVal) ||
+                              (s.matricula && s.matricula.toLowerCase().includes(searchVal)) ||
+                              (s.role && s.role.toLowerCase().includes(searchVal));
+        const matchesSector = !sectorVal || (s.sector || "") === sectorVal;
+        return matchesSearch && matchesSector;
+      });
+
+      document.getElementById("dbModalTotalCount").innerText = filtered.length;
+
+      if (filtered.length === 0) {
+        tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-slate-400 text-xs">Nenhum servidor encontrado na base de dados.</td></tr>`;
+        return;
+      }
+
+      filtered.forEach(srv => {
+        const tr = document.createElement("tr");
+        tr.className = "hover:bg-slate-50 transition border-b border-slate-200";
+
+        tr.innerHTML = `
+          <td class="p-2 text-center">
+            <input type="checkbox" class="db-checkbox rounded text-emerald-600 focus:ring-emerald-500 cursor-pointer" value="${srv.id}" onchange="updateDbBatchUI()">
+          </td>
+          <td class="p-2 font-medium text-slate-800">
+            <div>${srv.shortName}</div>
+            <div class="text-[10px] text-slate-400 font-normal">${srv.fullName}</div>
+          </td>
+          <td class="p-2 text-slate-600">${srv.matricula || '-'}</td>
+          <td class="p-2 text-slate-600">${srv.role || '-'}</td>
+          <td class="p-2 text-slate-600">${srv.degree || '-'}</td>
+          <td class="p-2 text-center text-slate-600">${srv.ch || '-'}</td>
+          <td class="p-2 text-center">
+            <span class="bg-indigo-50 text-indigo-700 px-2 py-0.5 rounded text-[10px] font-semibold">${srv.sector || 'S/S'}</span>
+          </td>
+          <td class="p-2 text-center">
+            <span class="inline-block w-5 h-5 rounded-full border border-slate-300" style="background-color: ${srv.color || '#10b981'}"></span>
+          </td>
+          <td class="p-2 text-center space-x-1">
+            <button onclick="editServerFromDb('${srv.id}')" class="px-2 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded text-[11px]" title="Editar Servidor">
+              <i class="fa-solid fa-pen"></i>
+            </button>
+            <button onclick="deleteServerFromDb('${srv.id}')" class="px-2 py-1 bg-rose-100 hover:bg-rose-200 text-rose-700 rounded text-[11px]" title="Apagar Servidor">
+              <i class="fa-solid fa-trash-can"></i>
+            </button>
+          </td>
+        `;
+
+        tbody.appendChild(tr);
+      });
+
+      updateDbBatchUI();
+    }
+
+    function toggleSelectAllDb(checked) {
+      const checkboxes = document.querySelectorAll(".db-checkbox");
+      checkboxes.forEach(cb => cb.checked = checked);
+      updateDbBatchUI();
+    }
+
+    function updateDbBatchUI() {
+      const checkboxes = document.querySelectorAll(".db-checkbox:checked");
+      const count = checkboxes.length;
+      const batchBox = document.getElementById("dbBatchActions");
+      const countSpan = document.getElementById("dbSelectedCount");
+
+      if (count > 0) {
+        batchBox.classList.remove("hidden");
+        countSpan.innerText = count;
+      } else {
+        batchBox.classList.add("hidden");
+      }
+    }
+
+    function deleteSelectedDbServers() {
+      const checkedBoxes = document.querySelectorAll(".db-checkbox:checked");
+      const selectedIds = Array.from(checkedBoxes).map(cb => cb.value);
+
+      if (selectedIds.length === 0) return;
+
+      if (confirm(`Deseja apagar definitivamente os ${selectedIds.length} servidores selecionados da base de dados?`)) {
+        state.dbServers = state.dbServers.filter(s => !selectedIds.includes(s.id));
+        
+        // Remove também das listas de setores e das grades
+        state.sectors.forEach(sec => {
+          sec.serverIds = sec.serverIds.filter(id => !selectedIds.includes(id));
+          Object.keys(sec.grid).forEach(key => {
+            if (sec.grid[key] && selectedIds.includes(sec.grid[key].serverId)) {
+              delete sec.grid[key];
+            }
+          });
+        });
+
+        saveState();
+        renderAll();
+      }
+    }
+
+    function openNewServerDbModal() {
+      document.getElementById("serverFormTitle").innerText = "Cadastrar Novo Servidor";
+      document.getElementById("serverId").value = "";
+      document.getElementById("serverShortName").value = "";
+      document.getElementById("serverFullName").value = "";
+      document.getElementById("serverMatricula").value = "";
+      document.getElementById("serverCh").value = "";
+      document.getElementById("serverRole").value = "";
+      document.getElementById("serverDegree").value = "";
+      document.getElementById("serverSector").value = "";
+      document.getElementById("serverColor").value = "#10b981";
+
+      toggleModal("modalServerForm");
+    }
+
+    function editServerFromDb(srvId) {
+      const srv = state.dbServers.find(s => s.id === srvId);
+      if (!srv) return;
+
+      document.getElementById("serverFormTitle").innerText = "Editar Servidor";
+      document.getElementById("serverId").value = srv.id;
+      document.getElementById("serverShortName").value = srv.shortName || "";
+      document.getElementById("serverFullName").value = srv.fullName || "";
+      document.getElementById("serverMatricula").value = srv.matricula || "";
+      document.getElementById("serverCh").value = srv.ch || "";
+      document.getElementById("serverRole").value = srv.role || "";
+      document.getElementById("serverDegree").value = srv.degree || "";
+      document.getElementById("serverSector").value = srv.sector || "";
+      document.getElementById("serverColor").value = srv.color || "#10b981";
+
+      toggleModal("modalServerForm");
+    }
+
+    function saveServerForm(e) {
+      e.preventDefault();
+      const id = document.getElementById("serverId").value;
+      const shortName = document.getElementById("serverShortName").value.trim();
+      const fullName = document.getElementById("serverFullName").value.trim();
+      const matricula = document.getElementById("serverMatricula").value.trim();
+      const ch = document.getElementById("serverCh").value.trim();
+      const role = document.getElementById("serverRole").value.trim();
+      const degree = document.getElementById("serverDegree").value.trim();
+      const sector = document.getElementById("serverSector").value.trim();
+      const color = document.getElementById("serverColor").value;
+
+      if (id) {
+        // Atualiza existente
+        const srv = state.dbServers.find(s => s.id === id);
+        if (srv) {
+          srv.shortName = shortName;
+          srv.fullName = fullName;
+          srv.matricula = matricula;
+          srv.ch = ch;
+          srv.role = role;
+          srv.degree = degree;
+          srv.sector = sector;
+          srv.color = color;
+        }
+      } else {
+        // Novo servidor
+        const newSrv = {
+          id: "srv_" + Date.now(),
+          shortName, fullName, matricula, ch, role, degree, sector, color
+        };
+        state.dbServers.push(newSrv);
+        
+        // Insere automaticamente no setor ativo
+        const sec = getCurrentSector();
+        if (!sec.serverIds.includes(newSrv.id)) {
+          sec.serverIds.push(newSrv.id);
+        }
+      }
+
+      saveState();
+      toggleModal("modalServerForm");
+      renderAll();
+    }
+
+    function deleteServerFromDb(srvId) {
+      if (confirm("Deseja apagar este servidor da base de dados global?")) {
+        state.dbServers = state.dbServers.filter(s => s.id !== srvId);
+        
+        // Remove dos setores e das alocações da grade
+        state.sectors.forEach(sec => {
+          sec.serverIds = sec.serverIds.filter(id => id !== srvId);
+          Object.keys(sec.grid).forEach(key => {
+            if (sec.grid[key] && sec.grid[key].serverId === srvId) {
+              delete sec.grid[key];
+            }
+          });
+        });
+
+        saveState();
+        renderAll();
+      }
+    }
+
+    // --- ATUALIZAÇÃO DOS MENUS DE FILTRO POR SETOR ---
+    function updateSectorsFilterSelects() {
+      // Coleta todos os setores cadastrados nos servidores
+      const sectorsSet = new Set();
+      state.dbServers.forEach(s => {
+        if (s.sector && s.sector.trim() !== "") {
+          sectorsSet.add(s.sector.trim());
+        }
+      });
+
+      const dbFilter = document.getElementById("dbSectorFilter");
+      const panelFilter = document.getElementById("sectorPanelFilter");
+
+      const currDbVal = dbFilter.value;
+      const currPanelVal = panelFilter.value;
+
+      dbFilter.innerHTML = `<option value="">Todos os Setores</option>`;
+      panelFilter.innerHTML = `<option value="">Todos os Setores Vinculados</option>`;
+
+      sectorsSet.forEach(secName => {
+        dbFilter.innerHTML += `<option value="${secName}">${secName}</option>`;
+        panelFilter.innerHTML += `<option value="${secName}">${secName}</option>`;
+      });
+
+      dbFilter.value = currDbVal;
+      panelFilter.value = currPanelVal;
+    }
+
+    // --- IMPORTAÇÃO CSV / EXCEL ---
+    function processCsvImport() {
+      const fileInput = document.getElementById("csvFileInput");
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Por favor, selecione um arquivo CSV.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        const text = e.target.result;
+        const lines = text.split("\n");
+        if (lines.length <= 1) return;
+
+        let addedCount = 0;
+        // Paleta de cores para auto-atribuição
+        const colors = ["#10b981", "#0284c7", "#e11d48", "#8b5cf6", "#d97706", "#059669", "#2563eb", "#c026d3"];
+
+        for (let i = 1; i < lines.length; i++) {
+          const line = lines[i].trim();
+          if (!line) continue;
+
+          const cols = line.split(",").map(c => c.trim().replace(/^["']|["']$/g, ''));
+          if (cols.length >= 2) {
+            const shortName = cols[0];
+            const fullName = cols[1] || cols[0];
+            const matricula = cols[2] || "";
+            const role = cols[3] || "";
+            const degree = cols[4] || "";
+            const ch = cols[5] || "";
+            const sector = cols[6] || "";
+
+            const newSrv = {
+              id: "srv_" + Date.now() + "_" + Math.random().toString(36).substr(2, 4),
+              shortName, fullName, matricula, role, degree, ch, sector,
+              color: colors[Math.floor(Math.random() * colors.length)]
+            };
+
+            state.dbServers.push(newSrv);
+            addedCount++;
+          }
+        }
+
+        saveState();
+        toggleModal("modalImportDb");
+        renderAll();
+        alert(`${addedCount} servidor(es) importado(s) com sucesso!`);
+      };
+
+      reader.readAsText(file);
+    }
+
+    // --- EXPORTAR E RESTAURAR BACKUP JSON ---
+    function exportToJson() {
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(state, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `Backup_Horarios_Diac_${new Date().toISOString().slice(0,10)}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+    }
+
+    function processJsonImport() {
+      const fileInput = document.getElementById("jsonFileInput");
+      const file = fileInput.files[0];
+      if (!file) {
+        alert("Por favor, selecione um arquivo JSON.");
+        return;
+      }
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const imported = JSON.parse(e.target.result);
+          if (imported && imported.dbServers && imported.sectors) {
+            state = imported;
+            saveState();
+            toggleModal("modalImportJson");
+            renderAll();
+            alert("Estado e dados restaurados com sucesso!");
+          } else {
+            alert("Formato de arquivo JSON inválido.");
+          }
+        } catch(err) {
+          alert("Erro ao ler o arquivo JSON.");
+        }
+      };
+
+      reader.readAsText(file);
+    }
+
+    // --- EXPORTAR A GRADE PARA PDF (A4 PAISAGEM) ---
+    function exportToPdf() {
+      const element = document.getElementById("gridPdfContainer");
+      const secName = getCurrentSector().name;
+
+      const opt = {
+        margin:       [0.3, 0.3, 0.3, 0.3],
+        filename:     `Grade_Horarios_${secName.replace(/\s+/g, '_')}.pdf`,
+        image:        { type: 'jpeg', quality: 0.98 },
+        html2canvas:  { scale: 2 },
+        jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+      };
+
+      html2pdf().set(opt).from(element).save();
+    }
+
+    // --- UTILITÁRIO DE MODAIS ---
+    function toggleModal(modalId) {
+      const modal = document.getElementById(modalId);
+      if (modal) {
+        modal.classList.toggle("hidden");
+      }
+    }
+  </script>
+</body>
+</html>

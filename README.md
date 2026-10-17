@@ -96,9 +96,24 @@ Toda a interface original foi mantida e aprimorada:
 - Exportação PDF e Impressão
 - Múltiplos setores / cenários
 - Alertas de sobrecarga de CH
-- Base Central de Servidores
+- Base Central de Servidores (111 servidores sincronizados)
 - Backup JSON (exportar/importar)
+- **Persistência Híbrida Inteligente (GitHub Pages + Local):**
+  - O banco de dados oficial completo está embutido diretamente no `index.html`.
+  - Ao publicar no GitHub Pages ou abrir em outro navegador, o sistema já abre com 100% dos dados pré-carregados (sem necessidade de backend ativo).
+  - Botão **"Restaurar Padrão"** no cabeçalho para retornar aos dados oficiais do repositório a qualquer momento.
 
 ---
 
-*Versão Web — atualizada em 02/10/2026*
+## 🌐 Publicação no GitHub / GitHub Pages
+
+Para publicar sua aplicação na web pelo GitHub Pages:
+1. Envie os arquivos para o seu repositório no GitHub (garanta que o **`index.html`** esteja na raiz do repositório).
+2. No GitHub, acesse: **Settings** > **Pages**.
+3. Em **Build and deployment** > **Source**, selecione **Deploy from a branch**.
+4. Em **Branch**, selecione `main` (ou `master`) e a pasta `/ (root)`. Clique em **Save**.
+5. O link gerado (ex: `https://seu-usuario.github.io/seu-repositorio/`) já abrirá com todos os setores, servidores e horários prontos para qualquer pessoa!
+
+---
+
+*Versão Web — atualizada em 17/10/2026*

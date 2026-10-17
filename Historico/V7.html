@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Horários - Diac/SGA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- html2pdf.js para Exportação PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; font-size: 10pt; }
+            .print-full-width { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+            .schedule-cell { height: auto !important; min-height: 36px !important; }
+            .time-slot-block { padding: 1px 2px !important; font-size: 8pt !important; }
+            @page { size: A4 landscape; margin: 0.8cm; }
+        }
+
+        .dragging { opacity: 0.5; border: 2px dashed #3b82f6 !important; }
+        .drag-over { background-color: #e0f2fe !important; border: 2px dashed #0284c7 !important; }
+        
+        .selectable-cell { user-select: none; }
+        .selected-cell { background-color: #bae6fd !important; }
+
+        /* Estilo da Borda Tracejada com Linhas Espaçadas e Longas para Modo Remoto */
+        .slot-remoto {
+            background-color: transparent !important;
+            border: 3px dashed transparent !important;
+            background-image: linear-gradient(white, white), 
+                              repeating-linear-gradient(90deg, #1e293b 0, #1e293b 12px, transparent 12px, transparent 22px),
+                              repeating-linear-gradient(180deg, #1e293b 0, #1e293b 12px, transparent 12px, transparent 22px),
+                              repeating-linear-gradient(270deg, #1e293b 0, #1e293b 12px, transparent 12px, transparent 22px),
+                              repeating-linear-gradient(0deg, #1e293b 0, #1e293b 12px, transparent 12px, transparent 22px) !important;
+            background-origin: border-box !important;
+            background-clip: padding-box, border-box !important;
+        }
+
+        .active-brush-card {
+            ring: 3px !important;
+            ring-color: #2563eb !important;
+            border-color: #2563eb !important;
+            background-color: #eff6ff !important;
+            transform: scale(1.02);
+        }
+
+        @keyframes pulse-banner {
+            0%, 100% { opacity: 1; transform: translateY(0); }
+            50% { opacity: 0.95; transform: translateY(-1px); }
+        }
+        .banner-overload { animation: pulse-banner 2s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-slate-900 text-white shadow-lg sticky top-0 z-30 no-print">
+        <div class="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 p-2 rounded-lg text-white shadow-sm">
+                    <i class="fa-solid fa-calendar-days text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight tracking-tight">Gestão de Horários</h1>
+                    <p class="text-xs text-slate-400 font-medium">Diac/SGA</p>
+                </div>
+            </div>
+
+            <!-- Botão de Cancelar Seleção (ESC) e Pincel -->
+            <div id="active-brush-bar" class="hidden flex items-center gap-2 bg-blue-900/80 border border-blue-500/50 px-3 py-1.5 rounded-lg">
+                <i class="fa-solid fa-paint-brush text-blue-300 animate-pulse text-xs"></i>
+                <span class="text-xs font-semibold text-blue-100">Pincel: <strong id="active-brush-name" class="text-white">--</strong></span>
+                <button onclick="clearActiveBrush()" class="ml-2 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-2xs flex items-center gap-1 transition" title="Pressione ESC para cancelar">
+                    <span>ESC</span> <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Botões de Ação Principais -->
+            <div class="flex items-center space-x-2">
+                <button onclick="openCreateSectorModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm" title="Criar um novo setor/cenário de trabalho">
+                    <i class="fa-solid fa-folder-plus"></i> <span class="hidden sm:inline">Criar Setor</span>
+                </button>
+                <button onclick="exportToPDF()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm" title="Baixar grade formatada em PDF">
+                    <i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Baixar PDF</span>
+                </button>
+                
+                <!-- Backup JSON -->
+                <button onclick="exportBackupData()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shadow-sm" title="Exportar backup completo em arquivo JSON">
+                    <i class="fa-solid fa-download"></i> <span class="hidden md:inline">Exportar JSON</span>
+                </button>
+                <button onclick="triggerImportData()" class="bg-violet-600 hover:bg-violet-700 text-white px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shadow-sm" title="Importar backup JSON">
+                    <i class="fa-solid fa-upload"></i> <span class="hidden md:inline">Importar JSON</span>
+                </button>
+                <input type="file" id="import-file-input" accept=".json" onchange="importBackupData(event)" class="hidden">
+
+                <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-print"></i> <span class="hidden lg:inline">Imprimir</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-slate-800/90 border-t border-slate-700/60 px-4 sm:px-6 lg:px-8">
+            <div class="max-w-[1700px] mx-auto flex items-center justify-between overflow-x-auto no-scrollbar">
+                <div id="sectors-tabs-container" class="flex items-center space-x-1 py-1.5">
+                    <!-- Abas injetadas via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div id="alerts-container" class="no-print max-w-[1700px] w-full mx-auto px-4 sm:px-6 pt-4 hidden">
+        <!-- Notificações geradas dinamicamente -->
+    </div>
+
+    <main class="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6 print-full-width">
+        
+        <!-- VISÃO 1: BASE DE DADOS CENTRAL "SERVIDORES" -->
+        <section id="central-database-section" class="hidden no-print space-y-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-database text-blue-600"></i> Base Central de Servidores
+                    </h2>
+                    <p class="text-xs text-slate-500">Cadastre a lista global de docentes e técnicos para importar para qualquer setor/cenário.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="openServerModal(null, true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                        <i class="fa-solid fa-user-plus"></i> Adicionar Servidor
+                    </button>
+                    <button onclick="openCsvHelpModal()" class="bg-teal-600 hover:bg-teal-700 text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                        <i class="fa-solid fa-file-excel"></i> Importar Excel / CSV
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-3 bg-slate-50 border-b border-slate-200 flex items-center justify-between">
+                    <input type="text" id="search-central-server" oninput="renderCentralDatabaseTable()" placeholder="Buscar por nome, matrícula, disciplina ou titulação..." class="text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 w-72 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <span id="central-count-badge" class="text-xs font-semibold text-slate-500">0 servidores cadastrados</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
+                                <th class="py-2.5 px-3">Cor</th>
+                                <th class="py-2.5 px-3">Nome Fantasia</th>
+                                <th class="py-2.5 px-3">Nome Completo</th>
+                                <th class="py-2.5 px-3">Matrícula</th>
+                                <th class="py-2.5 px-3">Disciplina / Função</th>
+                                <th class="py-2.5 px-3">Titulação</th>
+                                <th class="py-2.5 px-3 text-center">Carga Horária</th>
+                                <th class="py-2.5 px-3 text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="central-database-tbody" class="divide-y divide-slate-200">
+                            <!-- Injetado dinamicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- VISÃO 2: GRADE DE HORÁRIOS DO SETOR / CENÁRIO ATIVO -->
+        <section id="sector-view-section" class="grid grid-cols-1 lg:grid-cols-12 gap-6 print-full-width">
+            
+            <!-- Painel Lateral de Servidores do Setor -->
+            <aside class="lg:col-span-4 xl:col-span-3 flex flex-col gap-4 no-print">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col h-[calc(100vh-10rem)] sticky top-28">
+                    
+                    <div class="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-users text-slate-500"></i>
+                            <h2 class="font-semibold text-slate-800 text-sm">Quadro do Setor</h2>
+                            <span id="server-count" class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="openServerModal()" class="text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md font-semibold" title="Adicionar servidor exclusivo neste setor">
+                                + Servidor
+                            </button>
+                            <button onclick="addIntervalQuickly()" class="text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md font-semibold" title="Usar Servidor INTERVALO (10h)">
+                                <i class="fa-solid fa-mug-hot"></i> Intervalo
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <input type="text" id="search-server" oninput="renderServers()" placeholder="Buscar por nome, função..." class="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+
+                    <!-- Ordenação -->
+                    <div class="bg-slate-50 p-2 rounded-lg border border-slate-200 mb-2 flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-slate-500 uppercase">Ordenar por:</span>
+                        <div class="flex items-center gap-1.5">
+                            <select id="sort-type" onchange="renderServers()" class="flex-1 text-xs bg-white border border-slate-200 rounded px-2 py-1 font-medium text-slate-700">
+                                <option value="REGISTER">Ordem de Cadastro</option>
+                                <option value="NAME">Nome Fantasia (A-Z)</option>
+                                <option value="HOURS">Carga Horária (h)</option>
+                                <option value="GRID_USAGE">Aparições na Grade</option>
+                            </select>
+                            <button id="sort-dir-btn" onclick="toggleSortDirection()" class="bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 p-1 rounded text-xs px-2 font-semibold">
+                                <i id="sort-dir-icon" class="fa-solid fa-arrow-down-a-z"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lista dos Servidores -->
+                    <div id="servers-list" class="flex-1 overflow-y-auto space-y-2 pr-1">
+                        <!-- Cards carregados via JS -->
+                    </div>
+                </div>
+            </aside>
+
+            <section class="lg:col-span-8 xl:col-span-9 flex flex-col gap-4 print-full-width">
+                
+                <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 no-print">
+                    <div class="flex items-center gap-3">
+                        <span class="text-xs font-semibold text-slate-600">Filtrar:</span>
+                        <select id="filter-server-highlight" onchange="highlightServerSchedule(this.value)" class="bg-slate-50 border border-slate-200 text-xs font-medium rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="ALL">Mostrar Todos os Servidores</option>
+                        </select>
+                    </div>
+
+                    <!-- SELETOR 30 MIN VS 1 HORA -->
+                    <div class="flex items-center gap-2 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <span class="text-[11px] font-bold text-slate-500 px-1">Exibição:</span>
+                        <button id="btn-view-30" onclick="setGridInterval('30')" class="px-2.5 py-1 rounded text-xs font-semibold transition bg-blue-600 text-white shadow-xs">
+                            30 Min
+                        </button>
+                        <button id="btn-view-60" onclick="setGridInterval('60')" class="px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200">
+                            1 Hora
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-4 text-xs text-slate-500">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-3.5 h-3.5 rounded border-2 border-dashed border-slate-700 bg-transparent inline-block"></span>
+                            <span class="font-medium text-slate-700">Remoto</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-3.5 h-3.5 rounded bg-blue-200 border border-blue-400 inline-block"></span>
+                            <span>Presencial</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabela de Horários -->
+                <div id="pdf-container" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print-full-width p-2">
+                    <div class="hidden print:block mb-4 text-center border-b pb-2">
+                        <h2 id="print-sector-title" class="text-xl font-bold text-slate-800">Gestão de Horários - Diac/SGA</h2>
+                        <p class="text-xs text-slate-500">Quadro Horário Semanal Integrado dos Servidores</p>
+                    </div>
+                    
+                    <div class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-13.5rem)] print:max-h-none">
+                        <table class="w-full border-collapse text-left text-xs min-w-[750px]">
+                            <thead>
+                                <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-20 shadow-xs">
+                                    <th class="py-2.5 px-2 w-24 text-center font-bold border-r border-slate-200 bg-slate-100">
+                                        <i class="fa-regular fa-clock mr-1"></i> Horário
+                                    </th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">SEG</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">TER</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUA</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUI</th>
+                                    <th class="py-2.5 px-2 text-center font-bold w-1/5">SEX</th>
+                                </tr>
+                            </thead>
+                            <tbody id="schedule-body" class="divide-y divide-slate-200">
+                                <!-- Gerado via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <!-- MODAL DE CADASTRO/EDIÇÃO DE SERVIDOR -->
+    <div id="modal-server" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-md overflow-hidden p-6">
+            <div class="flex justify-between items-center pb-4 border-b border-slate-100 mb-4">
+                <h3 id="modal-title" class="text-lg font-bold text-slate-800">Cadastrar Servidor</h3>
+                <button onclick="closeServerModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form id="form-server" onsubmit="saveServer(event)" class="space-y-3">
+                <input type="hidden" id="server-id">
+                <input type="hidden" id="server-is-central">
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Fantasia / Apelido *</label>
+                    <input type="text" id="server-nickname" required placeholder="Ex: João Silva" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Completo *</label>
+                    <input type="text" id="server-fullname" required placeholder="Ex: João da Silva Santos" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Matrícula</label>
+                        <input type="text" id="server-reg" placeholder="Ex: 123456" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Disciplina / Função *</label>
+                        <input type="text" id="server-role" required placeholder="Ex: Matemática" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Titulação</label>
+                        <input type="text" id="server-degree" placeholder="Ex: Mestre / Doutor" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Carga Horária (h) *</label>
+                        <input type="number" id="server-hours" min="0.5" step="0.5" required placeholder="Ex: 40" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Cor do Card</label>
+                    <div class="flex gap-2 items-center">
+                        <input type="color" id="server-color" class="h-8 w-10 rounded border border-slate-300 cursor-pointer p-0.5">
+                        <button type="button" onclick="suggestNewColor()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded text-xs flex-1 transition">
+                            <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Sugerir
+                        </button>
+                    </div>
+                </div>
+
+                <div>
+                    <span class="block text-xs text-slate-500 mb-1">Sugestões de cores:</span>
+                    <div class="flex gap-1.5" id="color-palette-suggestions">
+                        <!-- Injetado via JS -->
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeServerModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium shadow-sm">Salvar Servidor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE CRIAÇÃO DE CENÁRIO / SETOR -->
+    <div id="modal-create-sector" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-md overflow-hidden p-6">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                <h3 class="text-lg font-bold text-slate-800">Criar Novo Setor / Cenário</h3>
+                <button onclick="closeCreateSectorModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form onsubmit="confirmCreateSector(event)" class="space-y-4">
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome do Setor / Cenário *</label>
+                    <input type="text" id="sector-name-input" required placeholder="Ex: Diretoria Acadêmica, Coordenação TI" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Origem dos Servidores *</label>
+                    <select id="sector-copy-source" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="CENTRAL">Copiar todos os servidores da Base Central ("SERVIDORES")</option>
+                        <option value="EMPTY">Criar quadro do setor em branco (sem servidores)</option>
+                        <!-- Outros cenários existentes injetados dinamicamente -->
+                    </select>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeCreateSectorModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                    <button type="submit" class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-medium shadow-sm">Criar Setor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL IMPORTAÇÃO CSV / EXCEL -->
+    <div id="modal-csv-help" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-lg overflow-hidden p-6">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                <div class="flex items-center gap-2 text-teal-700">
+                    <i class="fa-solid fa-file-csv text-2xl"></i>
+                    <h3 class="text-lg font-bold text-slate-800">Importar Planilha Excel / CSV</h3>
+                </div>
+                <button onclick="closeCsvHelpModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4 text-xs text-slate-600">
+                <p>Carregue os servidores salvos em um arquivo `.csv` extraído do Excel ou Google Sheets.</p>
+                
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span class="font-bold text-slate-700 block mb-1">Cabeçalhos suportados na 1ª linha:</span>
+                    <div class="bg-white p-2 rounded border border-slate-300 font-mono text-[11px] overflow-x-auto">
+                        Nome Fantasia, Nome Completo, Matrícula, Função, Titulação, Carga Horária, Cor
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center pt-1">
+                    <button type="button" onclick="downloadCsvTemplate()" class="text-teal-700 hover:text-teal-900 font-semibold flex items-center gap-1">
+                        <i class="fa-solid fa-download"></i> Baixar Planilha Modelo (.csv)
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-4 border-t border-slate-100 mt-4">
+                <button type="button" onclick="closeCsvHelpModal()" class="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                <button type="button" onclick="triggerImportCsv()" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium flex items-center gap-2">
+                    <i class="fa-solid fa-upload"></i> Selecionar Arquivo CSV
+                </button>
+                <input type="file" id="import-csv-input" accept=".csv, .txt" onchange="importCsvData(event)" class="hidden">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DAYS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
+        const START_HOUR = 7;
+        const END_HOUR = 22;
+        const INTERVAL_SERVER_ID = 's_intervalo';
+
+        const PASTEL_COLORS = [
+            '#e0f2fe', '#dcfce7', '#fef9c3', '#ffe4e6', '#f3e8ff', 
+            '#ffedd5', '#e0e7ff', '#ccfbf1', '#fae8ff', '#f1f5f9', '#1e293b'
+        ];
+
+        // Estado Global com Suporte a Cenários/Setores e Base Central
+        let appState = {
+            activeTab: 'CENTRAL', // 'CENTRAL' ou ID do Setor
+            centralDatabase: [],  // Lista Global de Servidores
+            sectors: [],          // [{ id, name, servers: [], schedule: {} }]
+            gridIntervalMinutes: 30
+        };
+
+        let draggedServerId = null;
+        let activeBrushServerId = null;
+        let isMouseDown = false;
+        let selectionStartCell = null;
+        let selectedCells = [];
+        let sortAscending = true;
+
+        window.onload = function() {
+            loadFromLocalStorage();
+            ensureIntervalServerExists();
+            renderTabs();
+            switchTab(appState.activeTab);
+            renderColorPaletteSuggestions();
+            setupGlobalMouseAndKeyEvents();
+        };
+
+        // --- MANIPULAÇÃO LOCALSTORAGE ---
+        function saveToLocalStorage() {
+            localStorage.setItem('diac_sga_appstate_v2', JSON.stringify(appState));
+        }
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem('diac_sga_appstate_v2');
+            if (saved) {
+                try {
+                    appState = JSON.parse(saved);
+                } catch(e) {
+                    console.error("Erro ao carregar dados salvos:", e);
+                }
+            } else {
+                // Estado Inicial Padrão
+                appState.centralDatabase = [
+                    { id: 'cs1', nickname: 'Ana Silva', fullname: 'Ana Clara Silva', reg: '10293', role: 'Matemática', degree: 'Mestre', hours: 20, color: '#e0f2fe', createdAt: 1 },
+                    { id: 'cs2', nickname: 'Carlos Souza', fullname: 'Carlos Eduardo Souza', reg: '88392', role: 'TI / Suporte', degree: 'Especialista', hours: 40, color: '#dcfce7', createdAt: 2 },
+                    { id: 'cs3', nickname: 'Mariana Costa', fullname: 'Mariana Luz Costa', reg: '47281', role: 'Português', degree: 'Doutora', hours: 30, color: '#fef9c3', createdAt: 3 }
+                ];
+
+                appState.sectors = [
+                    {
+                        id: 'sec_default',
+                        name: 'Diretoria Acadêmica',
+                        servers: JSON.parse(JSON.stringify(appState.centralDatabase)),
+                        schedule: {}
+                    }
+                ];
+                appState.activeTab = 'sec_default';
+            }
+        }
+
+        function ensureIntervalServerExists() {
+            let intervalInCentral = appState.centralDatabase.find(s => s.id === INTERVAL_SERVER_ID);
+            if (!intervalInCentral) {
+                appState.centralDatabase.unshift({
+                    id: INTERVAL_SERVER_ID,
+                    nickname: 'INTERVALO',
+                    fullname: 'Intervalo Intramapeamento / Almoço',
+                    reg: 'N/A',
+                    role: 'Pausa / Almoço',
+                    degree: 'N/A',
+                    hours: 10,
+                    color: '#e2e8f0',
+                    createdAt: 0
+                });
+            }
+
+            appState.sectors.forEach(sec => {
+                let intervalInSec = sec.servers.find(s => s.id === INTERVAL_SERVER_ID);
+                if (!intervalInSec) {
+                    sec.servers.unshift({
+                        id: INTERVAL_SERVER_ID,
+                        nickname: 'INTERVALO',
+                        fullname: 'Intervalo Intramapeamento / Almoço',
+                        reg: 'N/A',
+                        role: 'Pausa / Almoço',
+                        degree: 'N/A',
+                        hours: 10,
+                        color: '#e2e8f0',
+                        createdAt: 0
+                    });
+                }
+            });
+
+            saveToLocalStorage();
+        }
+
+        // --- SISTEMA DE ABAS / CENÁRIOS POR SETOR ---
+        function renderTabs() {
+            const container = document.getElementById('sectors-tabs-container');
+            container.innerHTML = '';
+
+            // Aba da Base Central "SERVIDORES"
+            const centralBtn = document.createElement('button');
+            const isCentralActive = appState.activeTab === 'CENTRAL';
+            centralBtn.className = `px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                isCentralActive 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+            }`;
+            centralBtn.innerHTML = `<i class="fa-solid fa-database text-amber-300"></i> SERVIDORES (Base Central)`;
+            centralBtn.onclick = () => switchTab('CENTRAL');
+            container.appendChild(centralBtn);
+
+            // Divisor
+            const divider = document.createElement('span');
+            divider.className = "h-4 w-px bg-slate-700 mx-1";
+            container.appendChild(divider);
+
+            // Abas dos Setores
+            appState.sectors.forEach((sec) => {
+                const isActive = appState.activeTab === sec.id;
+                const tabGroup = document.createElement('div');
+                tabGroup.className = "flex items-center group";
+
+                const secBtn = document.createElement('button');
+                secBtn.className = `px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-1.5 ${
+                    isActive 
+                        ? 'bg-slate-100 text-slate-900 font-bold shadow-sm' 
+                        : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                }`;
+                secBtn.innerHTML = `<i class="fa-solid fa-folder-tree ${isActive ? 'text-blue-600' : 'text-slate-400'}"></i> ${sec.name}`;
+                secBtn.onclick = () => switchTab(sec.id);
+
+                tabGroup.appendChild(secBtn);
+
+                // Botão de Excluir Setor (se houver mais de 1)
+                if (appState.sectors.length > 1) {
+                    const delBtn = document.createElement('button');
+                    delBtn.className = "text-slate-400 hover:text-red-400 p-1 text-[10px] opacity-0 group-hover:opacity-100 transition";
+                    delBtn.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+                    delBtn.title = `Excluir o setor ${sec.name}`;
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteSector(sec.id);
+                    };
+                    tabGroup.appendChild(delBtn);
+                }
+
+                container.appendChild(tabGroup);
+            });
+        }
+
+        function switchTab(tabId) {
+            appState.activeTab = tabId;
+            saveToLocalStorage();
+            renderTabs();
+            clearActiveBrush();
+
+            const centralSec = document.getElementById('central-database-section');
+            const sectorSec = document.getElementById('sector-view-section');
+
+            if (tabId === 'CENTRAL') {
+                centralSec.classList.remove('hidden');
+                sectorSec.classList.add('hidden');
+                renderCentralDatabaseTable();
+            } else {
+                centralSec.classList.add('hidden');
+                sectorSec.classList.remove('hidden');
+                
+                const currentSector = getCurrentSector();
+                if (currentSector) {
+                    document.getElementById('print-sector-title').innerText = `Gestão de Horários - ${currentSector.name}`;
+                }
+
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function getCurrentSector() {
+            return appState.sectors.find(s => s.id === appState.activeTab) || appState.sectors[0];
+        }
+
+        // --- CRIAÇÃO E GERENCIAMENTO DE SETORES ---
+        function openCreateSectorModal() {
+            const select = document.getElementById('sector-copy-source');
+            select.innerHTML = `
+                <option value="CENTRAL">Copiar todos os servidores da Base Central ("SERVIDORES")</option>
+                <option value="EMPTY">Criar quadro do setor em branco (sem servidores)</option>
+            `;
+
+            appState.sectors.forEach(sec => {
+                const opt = document.createElement('option');
+                opt.value = `SEC_${sec.id}`;
+                opt.innerText = `Copiar do Cenário: ${sec.name}`;
+                select.appendChild(opt);
+            });
+
+            document.getElementById('sector-name-input').value = '';
+            document.getElementById('modal-create-sector').classList.remove('hidden');
+        }
+
+        function closeCreateSectorModal() {
+            document.getElementById('modal-create-sector').classList.add('hidden');
+        }
+
+        function confirmCreateSector(e) {
+            e.preventDefault();
+            const name = document.getElementById('sector-name-input').value.trim();
+            const source = document.getElementById('sector-copy-source').value;
+
+            if (!name) return;
+
+            const newSectorId = 'sec_' + Date.now();
+            let newServers = [];
+            let newSchedule = {};
+
+            if (source === 'CENTRAL') {
+                newServers = JSON.parse(JSON.stringify(appState.centralDatabase));
+            } else if (source.startsWith('SEC_')) {
+                const sourceSecId = source.replace('SEC_', '');
+                const targetSec = appState.sectors.find(s => s.id === sourceSecId);
+                if (targetSec) {
+                    newServers = JSON.parse(JSON.stringify(targetSec.servers));
+                    newSchedule = JSON.parse(JSON.stringify(targetSec.schedule));
+                }
+            }
+
+            const newSector = {
+                id: newSectorId,
+                name: name,
+                servers: newServers,
+                schedule: newSchedule
+            };
+
+            appState.sectors.push(newSector);
+            ensureIntervalServerExists();
+            saveToLocalStorage();
+            closeCreateSectorModal();
+            switchTab(newSectorId);
+        }
+
+        function deleteSector(secId) {
+            const sec = appState.sectors.find(s => s.id === secId);
+            if (!sec) return;
+
+            if (confirm(`Tem certeza que deseja excluir o setor "${sec.name}" e toda a sua grade de horários?`)) {
+                appState.sectors = appState.sectors.filter(s => s.id !== secId);
+                if (appState.activeTab === secId) {
+                    appState.activeTab = appState.sectors[0] ? appState.sectors[0].id : 'CENTRAL';
+                }
+                saveToLocalStorage();
+                renderTabs();
+                switchTab(appState.activeTab);
+            }
+        }
+
+        // --- RENDERIZAÇÃO DA BASE CENTRAL "SERVIDORES" ---
+        function renderCentralDatabaseTable() {
+            const tbody = document.getElementById('central-database-tbody');
+            const searchVal = document.getElementById('search-central-server').value.toLowerCase();
+            tbody.innerHTML = '';
+
+            const filtered = appState.centralDatabase.filter(s => 
+                s.nickname.toLowerCase().includes(searchVal) ||
+                s.fullname.toLowerCase().includes(searchVal) ||
+                s.reg.toLowerCase().includes(searchVal) ||
+                s.role.toLowerCase().includes(searchVal) ||
+                (s.degree && s.degree.toLowerCase().includes(searchVal))
+            );
+
+            document.getElementById('central-count-badge').innerText = `${filtered.length} servidores encontrados`;
+
+            filtered.forEach(server => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition";
+                
+                tr.innerHTML = `
+                    <td class="py-2 px-3">
+                        <span class="w-4 h-4 rounded-full inline-block border border-slate-300" style="background-color: ${server.color}"></span>
+                    </td>
+                    <td class="py-2 px-3 font-bold text-slate-800">${server.nickname}</td>
+                    <td class="py-2 px-3 text-slate-600">${server.fullname}</td>
+                    <td class="py-2 px-3 font-mono text-slate-500">${server.reg || '-'}</td>
+                    <td class="py-2 px-3 font-medium text-slate-700">${server.role}</td>
+                    <td class="py-2 px-3 text-slate-500">${server.degree || '-'}</td>
+                    <td class="py-2 px-3 text-center font-bold text-slate-800">${server.hours}h</td>
+                    <td class="py-2 px-3 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button onclick="openServerModal('${server.id}', true)" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            ${server.id !== INTERVAL_SERVER_ID ? `
+                                <button onclick="deleteCentralServer('${server.id}')" class="text-red-500 hover:text-red-700 p-1" title="Excluir da Base Central">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function deleteCentralServer(id) {
+            if (confirm("Deseja remover este servidor da Base Central? (Os setores que já o possuem cadastrado não serão afetados).")) {
+                appState.centralDatabase = appState.centralDatabase.filter(s => s.id !== id);
+                saveToLocalStorage();
+                renderCentralDatabaseTable();
+            }
+        }
+
+        // --- CÁLCULO DINÂMICO DE CONTRASTE DE TEXTO ---
+        function getContrastTextColor(hexColor) {
+            if (!hexColor || hexColor.length < 6) return '#1e293b';
+            let hex = hexColor.replace('#', '');
+            if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+            
+            const r = parseInt(hex.substring(0, 2), 16) || 0;
+            const g = parseInt(hex.substring(2, 4), 16) || 0;
+            const b = parseInt(hex.substring(4, 6), 16) || 0;
+
+            const luminance = (r * 299 + g * 587 + b * 114) / 1000;
+            return luminance < 130 ? '#ffffff' : '#1e293b';
+        }
+
+        // --- MODO PINCEL ---
+        function setActiveBrushServer(serverId) {
+            if (activeBrushServerId === serverId) {
+                clearActiveBrush();
+                return;
+            }
+            activeBrushServerId = serverId;
+            const sec = getCurrentSector();
+            const server = sec ? sec.servers.find(s => s.id === serverId) : null;
+            
+            if (server) {
+                document.getElementById('active-brush-bar').classList.remove('hidden');
+                document.getElementById('active-brush-name').innerText = server.nickname;
+            }
+            renderServers();
+        }
+
+        function clearActiveBrush() {
+            activeBrushServerId = null;
+            document.getElementById('active-brush-bar').classList.add('hidden');
+            renderServers();
+        }
+
+        function setGridInterval(minutes) {
+            appState.gridIntervalMinutes = parseInt(minutes, 10);
+            saveToLocalStorage();
+            updateGridIntervalButtons();
+            renderScheduleTable();
+        }
+
+        function updateGridIntervalButtons() {
+            const btn30 = document.getElementById('btn-view-30');
+            const btn60 = document.getElementById('btn-view-60');
+
+            if (appState.gridIntervalMinutes === 60) {
+                btn60.className = "px-2.5 py-1 rounded text-xs font-semibold transition bg-blue-600 text-white shadow-xs";
+                btn30.className = "px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200";
+            } else {
+                btn30.className = "px-2.5 py-1 rounded text-xs font-semibold transition bg-blue-600 text-white shadow-xs";
+                btn60.className = "px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200";
+            }
+        }
+
+        function renderScheduleTable() {
+            const tbody = document.getElementById('schedule-body');
+            tbody.innerHTML = '';
+
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const schedule = currentSector.schedule;
+            const servers = currentSector.servers;
+
+            if (appState.gridIntervalMinutes === 60) {
+                for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                    const startStr = `${String(hour).padStart(2, '0')}:00`;
+                    const endStr = `${String(hour + 1).padStart(2, '0')}:00`;
+                    const labelTime = `${startStr} - ${endStr}`;
+
+                    const subSlot00 = startStr;
+                    const subSlot30 = `${String(hour).padStart(2, '0')}:30`;
+
+                    const tr = document.createElement('tr');
+                    tr.className = "hover:bg-slate-50/50 transition-colors";
+
+                    const tdTime = document.createElement('td');
+                    tdTime.className = "py-1.5 px-2 font-semibold text-center border-r border-b border-slate-200 text-slate-600 bg-slate-50/80 select-none text-[10px]";
+                    tdTime.innerText = labelTime;
+                    tr.appendChild(tdTime);
+
+                    DAYS.forEach(day => {
+                        const cellId00 = `${day}_${subSlot00}`;
+                        const cellId30 = `${day}_${subSlot30}`;
+
+                        const td = document.createElement('td');
+                        td.className = "schedule-cell border-r border-b border-slate-200 p-1 relative min-h-[46px] vertical-top selectable-cell cursor-pointer transition-all";
+                        td.dataset.cellId = cellId00;
+
+                        const cellContainer = document.createElement('div');
+                        cellContainer.className = "flex flex-col gap-1 w-full h-full min-h-[38px]";
+
+                        td.onclick = (e) => handleCellClickGrouped(e, cellId00, cellId30);
+                        td.addEventListener('mousedown', (e) => handleCellMouseDown(e, cellId00));
+                        td.addEventListener('mouseenter', () => handleCellMouseEnter(cellId00));
+                        td.addEventListener('dragover', handleDragOver);
+                        td.addEventListener('dragleave', handleDragLeave);
+                        td.addEventListener('drop', (e) => handleDropGrouped(e, cellId00, cellId30));
+
+                        const allocs00 = schedule[cellId00] || [];
+                        allocs00.forEach((alloc, index) => {
+                            const server = servers.find(s => s.id === alloc.serverId);
+                            if (server) {
+                                cellContainer.appendChild(createScheduleBlock(server, cellId00, index, alloc.isRemote));
+                            }
+                        });
+
+                        const allocs30 = schedule[cellId30] || [];
+                        allocs30.forEach((alloc, index) => {
+                            const server = servers.find(s => s.id === alloc.serverId);
+                            if (server) {
+                                cellContainer.appendChild(createScheduleBlock(server, cellId30, index, alloc.isRemote));
+                            }
+                        });
+
+                        td.appendChild(cellContainer);
+                        tr.appendChild(td);
+                    });
+
+                    tbody.appendChild(tr);
+                }
+            } else {
+                for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                    for (let min of [0, 30]) {
+                        const timeString = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                        const tr = document.createElement('tr');
+                        tr.className = "hover:bg-slate-50/50 transition-colors";
+
+                        const tdTime = document.createElement('td');
+                        tdTime.className = "py-1 px-2 font-semibold text-center border-r border-b border-slate-200 text-slate-500 bg-slate-50/80 select-none text-[11px]";
+                        tdTime.innerText = timeString;
+                        tr.appendChild(tdTime);
+
+                        DAYS.forEach(day => {
+                            const cellId = `${day}_${timeString}`;
+                            const td = document.createElement('td');
+                            td.className = "schedule-cell border-r border-b border-slate-200 p-1 relative min-h-[38px] vertical-top selectable-cell cursor-pointer transition-all";
+                            td.dataset.cellId = cellId;
+
+                            const cellContainer = document.createElement('div');
+                            cellContainer.className = "flex flex-col gap-1 w-full h-full min-h-[32px]";
+
+                            td.onclick = (e) => handleCellClickSingle(e, cellId);
+                            td.addEventListener('mousedown', (e) => handleCellMouseDown(e, cellId));
+                            td.addEventListener('mouseenter', () => handleCellMouseEnter(cellId));
+                            td.addEventListener('dragover', handleDragOver);
+                            td.addEventListener('dragleave', handleDragLeave);
+                            td.addEventListener('drop', (e) => handleDrop(e, cellId));
+
+                            const allocations = schedule[cellId] || [];
+                            allocations.forEach((alloc, index) => {
+                                const server = servers.find(s => s.id === alloc.serverId);
+                                if (server) {
+                                    cellContainer.appendChild(createScheduleBlock(server, cellId, index, alloc.isRemote));
+                                }
+                            });
+
+                            td.appendChild(cellContainer);
+                            tr.appendChild(td);
+                        });
+
+                        tbody.appendChild(tr);
+                    }
+                }
+            }
+        }
+
+        function createScheduleBlock(server, cellId, allocIndex, isRemote = false) {
+            const block = document.createElement('div');
+            block.className = `time-slot-block w-full rounded px-1.5 py-1 flex items-center justify-between shadow-xs border transition-all text-[11px] font-medium overflow-hidden group ${isRemote ? 'slot-remoto' : ''}`;
+            
+            const textColor = getContrastTextColor(server.color);
+
+            if (isRemote) {
+                block.style.backgroundColor = 'transparent';
+                block.style.color = '#1e293b';
+            } else {
+                block.style.backgroundColor = server.color || '#e0f2fe';
+                block.style.borderColor = getAdjustedColor(server.color, -30);
+                block.style.color = textColor;
+            }
+
+            block.dataset.serverId = server.id;
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = "flex items-center gap-1 min-w-0 truncate pointer-events-none";
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = "truncate font-semibold";
+            nameSpan.innerText = server.nickname;
+            nameSpan.title = `${server.fullname} (${server.role}) ${isRemote ? '[REMOTO]' : '[PRESENCIAL]'}`;
+
+            infoDiv.appendChild(nameSpan);
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = "flex items-center gap-1 flex-shrink-0 no-print";
+
+            const remoteBtn = document.createElement('button');
+            remoteBtn.type = "button";
+            remoteBtn.className = `px-1 py-0.2 text-[9px] font-bold rounded border transition ${
+                isRemote 
+                    ? 'bg-slate-800 text-white border-slate-900' 
+                    : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'
+            }`;
+            remoteBtn.innerText = isRemote ? "REM" : "PRES";
+            remoteBtn.onclick = (e) => {
+                e.stopPropagation();
+                toggleRemoteStatus(cellId, allocIndex);
+            };
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = "button";
+            removeBtn.className = "opacity-80 group-hover:opacity-100 text-slate-400 hover:text-red-600 px-0.5 rounded transition";
+            removeBtn.style.color = isRemote ? '#64748b' : (textColor === '#ffffff' ? '#e2e8f0' : '#64748b');
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark text-xs"></i>';
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                removeScheduleSlot(cellId, allocIndex);
+            };
+
+            actionsDiv.appendChild(remoteBtn);
+            actionsDiv.appendChild(removeBtn);
+
+            block.appendChild(infoDiv);
+            block.appendChild(actionsDiv);
+
+            return block;
+        }
+
+        function toggleRemoteStatus(cellId, allocIndex) {
+            const currentSector = getCurrentSector();
+            if (currentSector && currentSector.schedule[cellId] && currentSector.schedule[cellId][allocIndex]) {
+                currentSector.schedule[cellId][allocIndex].isRemote = !currentSector.schedule[cellId][allocIndex].isRemote;
+                saveToLocalStorage();
+                renderScheduleTable();
+            }
+        }
+
+        function toggleSortDirection() {
+            sortAscending = !sortAscending;
+            const icon = document.getElementById('sort-dir-icon');
+            icon.className = sortAscending ? "fa-solid fa-arrow-down-a-z" : "fa-solid fa-arrow-up-z-a";
+            renderServers();
+        }
+
+        function getSortedServers(serverList) {
+            const sortType = document.getElementById('sort-type')?.value || 'REGISTER';
+            const listCopy = [...serverList];
+
+            listCopy.sort((a, b) => {
+                let res = 0;
+                if (sortType === 'NAME') {
+                    res = a.nickname.localeCompare(b.nickname);
+                } else if (sortType === 'HOURS') {
+                    res = a.hours - b.hours;
+                } else if (sortType === 'GRID_USAGE') {
+                    res = calculateServerOccurrences(a.id) - calculateServerOccurrences(b.id);
+                } else {
+                    res = (a.createdAt || 0) - (b.createdAt || 0);
+                }
+                return sortAscending ? res : -res;
+            });
+
+            return listCopy;
+        }
+
+        function calculateServerOccurrences(serverId) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return 0;
+            let count = 0;
+            for (let key in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[key])) {
+                    currentSector.schedule[key].forEach(alloc => {
+                        if (alloc.serverId === serverId) count++;
+                    });
+                }
+            }
+            return count;
+        }
+
+        function renderServers() {
+            const listContainer = document.getElementById('servers-list');
+            const searchVal = document.getElementById('search-server').value.toLowerCase();
+            const filterSelect = document.getElementById('filter-server-highlight');
+            
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            listContainer.innerHTML = '';
+            
+            const currentFilter = filterSelect.value;
+            filterSelect.innerHTML = '<option value="ALL">Mostrar Todos os Servidores</option>';
+
+            let filtered = currentSector.servers.filter(s => 
+                s.nickname.toLowerCase().includes(searchVal) || 
+                s.fullname.toLowerCase().includes(searchVal) ||
+                s.role.toLowerCase().includes(searchVal)
+            );
+
+            filtered = getSortedServers(filtered);
+
+            document.getElementById('server-count').innerText = currentSector.servers.length;
+
+            currentSector.servers.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.innerText = `${s.nickname} (${s.role})`;
+                if (s.id === currentFilter) opt.selected = true;
+                filterSelect.appendChild(opt);
+            });
+
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-8 text-slate-400 text-xs">
+                        <i class="fa-solid fa-user-slash text-2xl mb-2"></i>
+                        <p>Nenhum servidor no quadro deste setor.</p>
+                    </div>`;
+                return;
+            }
+
+            filtered.forEach(server => {
+                const allocatedHours = calculateServerHours(server.id);
+                const occurrences = calculateServerOccurrences(server.id);
+                const progressPercent = Math.min(100, (allocatedHours / server.hours) * 100);
+                const isOverloaded = allocatedHours > server.hours;
+                const isActiveBrush = activeBrushServerId === server.id;
+                
+                let statusColor = "bg-emerald-500";
+                let statusText = "text-emerald-700 font-semibold";
+                
+                if (isOverloaded) {
+                    statusColor = "bg-red-600";
+                    statusText = "text-red-600 font-bold flex items-center gap-1";
+                } else if (allocatedHours < server.hours) {
+                    statusColor = "bg-amber-500";
+                    statusText = "text-amber-700 font-medium";
+                }
+
+                const card = document.createElement('div');
+                card.className = `bg-white p-2.5 rounded-xl border ${isActiveBrush ? 'active-brush-card' : (isOverloaded ? 'border-red-300 ring-1 ring-red-200' : 'border-slate-200')} shadow-xs hover:shadow-md transition cursor-pointer select-none group relative`;
+                card.draggable = true;
+
+                card.onclick = (e) => {
+                    if (e.target.closest('button')) return;
+                    setActiveBrushServer(server.id);
+                };
+
+                card.addEventListener('dragstart', (e) => handleDragStart(e, server.id));
+                card.addEventListener('dragend', handleDragEnd);
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="flex items-center gap-2">
+                            <span class="w-3.5 h-3.5 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${server.color}"></span>
+                            <div>
+                                <h3 class="font-bold text-xs text-slate-800 leading-tight flex items-center gap-1">
+                                    ${server.nickname}
+                                    ${isActiveBrush ? '<span class="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-bold">Pincel</span>' : ''}
+                                </h3>
+                                <p class="text-[10px] text-slate-500 truncate max-w-[120px]">${server.role}</p>
+                            </div>
+                        </div>
+                        
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                            <button onclick="editServer('${server.id}')" class="text-slate-400 hover:text-blue-600 p-1" title="Editar">
+                                <i class="fa-solid fa-pen text-xs"></i>
+                            </button>
+                            <button onclick="clearServerSchedule('${server.id}')" class="text-slate-400 hover:text-amber-600 p-1" title="Limpar Horários">
+                                <i class="fa-solid fa-eraser text-xs"></i>
+                            </button>
+                            <button onclick="deleteServer('${server.id}')" class="text-slate-400 hover:text-red-600 p-1" title="Excluir do Setor">
+                                <i class="fa-solid fa-trash text-xs"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="mt-1.5 text-xs">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-slate-400 text-[10px]">Grade: ${occurrences} slots</span>
+                            <span class="${statusText} text-[10px]">
+                                ${isOverloaded ? '<i class="fa-solid fa-triangle-exclamation"></i>' : ''} 
+                                ${allocatedHours}h / ${server.hours}h
+                            </span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div class="${statusColor} h-1.5 rounded-full transition-all duration-300" style="width: ${progressPercent}%"></div>
+                        </div>
+                    </div>
+                `;
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        function addIntervalQuickly() {
+            setActiveBrushServer(INTERVAL_SERVER_ID);
+        }
+
+        function calculateServerHours(serverId) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return 0;
+
+            let slots = 0;
+            for (let key in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[key])) {
+                    currentSector.schedule[key].forEach(alloc => {
+                        if (alloc.serverId === serverId) slots++;
+                    });
+                }
+            }
+            return slots * 0.5;
+        }
+
+        function checkAndRenderOverloadAlerts() {
+            const alertContainer = document.getElementById('alerts-container');
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const overloadedServers = [];
+
+            currentSector.servers.forEach(server => {
+                const allocated = calculateServerHours(server.id);
+                if (allocated > server.hours) {
+                    overloadedServers.push({
+                        server,
+                        allocated,
+                        exceeded: allocated - server.hours
+                    });
+                }
+            });
+
+            if (overloadedServers.length > 0) {
+                alertContainer.classList.remove('hidden');
+                alertContainer.innerHTML = overloadedServers.map(item => `
+                    <div class="bg-red-50 border-l-4 border-red-500 text-red-800 p-3 rounded-r-xl shadow-xs mb-2 flex items-center justify-between banner-overload">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-circle-exclamation text-red-600 text-lg"></i>
+                            <div>
+                                <p class="text-xs sm:text-sm font-bold">
+                                    Atenção: Carga Horária Excedida no setor "${currentSector.name}"!
+                                </p>
+                                <p class="text-xs text-red-700">
+                                    O servidor/item <strong>${item.server.nickname}</strong> (${item.server.fullname}) ultrapassou a jornada semanal configurada de <strong>${item.server.hours}h</strong>. Horas alocadas atualmente: <strong>${item.allocated}h</strong> (+${item.exceeded}h de excesso).
+                                </p>
+                            </div>
+                        </div>
+                        <button onclick="highlightServerSchedule('${item.server.id}')" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition shadow-2xs flex-shrink-0">
+                            Ver no Quadro
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                alertContainer.classList.add('hidden');
+                alertContainer.innerHTML = '';
+            }
+        }
+
+        // --- INTERAÇÃO DA GRADE ---
+        function handleCellClickSingle(e, cellId) {
+            if (e.target.closest('button')) return;
+            if (activeBrushServerId) {
+                assignServerToCell(activeBrushServerId, cellId);
+            }
+        }
+
+        function handleCellClickGrouped(e, cellId00, cellId30) {
+            if (e.target.closest('button')) return;
+            if (activeBrushServerId) {
+                assignServerToCell(activeBrushServerId, cellId00);
+                assignServerToCell(activeBrushServerId, cellId30);
+            }
+        }
+
+        function handleDragStart(e, serverId) {
+            draggedServerId = serverId;
+            e.dataTransfer.setData('text/plain', serverId);
+            e.currentTarget.classList.add('dragging');
+        }
+
+        function handleDragEnd(e) {
+            e.currentTarget.classList.remove('dragging');
+            draggedServerId = null;
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function handleDrop(e, cellId) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            if (draggedServerId) {
+                assignServerToCell(draggedServerId, cellId);
+            }
+        }
+
+        function handleDropGrouped(e, cellId00, cellId30) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            if (draggedServerId) {
+                assignServerToCell(draggedServerId, cellId00);
+                assignServerToCell(draggedServerId, cellId30);
+            }
+        }
+
+        function assignServerToCell(serverId, cellId, isRemote = false) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (!currentSector.schedule[cellId]) {
+                currentSector.schedule[cellId] = [];
+            }
+            currentSector.schedule[cellId].push({ serverId, isRemote });
+            
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function removeScheduleSlot(cellId, allocIndex) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (currentSector.schedule[cellId]) {
+                currentSector.schedule[cellId].splice(allocIndex, 1);
+                if (currentSector.schedule[cellId].length === 0) {
+                    delete currentSector.schedule[cellId];
+                }
+                saveToLocalStorage();
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function handleCellMouseDown(e, cellId) {
+            if (e.target.closest('button')) return;
+            isMouseDown = true;
+            selectionStartCell = cellId;
+            selectedCells = [cellId];
+            updateCellSelections();
+        }
+
+        function handleCellMouseEnter(cellId) {
+            if (!isMouseDown || !selectionStartCell) return;
+            const [startDay, startTime] = selectionStartCell.split('_');
+            const [currentDay, currentTime] = cellId.split('_');
+
+            if (startDay === currentDay) {
+                const times = getAllTimeSlots();
+                const startIndex = times.indexOf(startTime);
+                const currentIndex = times.indexOf(currentTime);
+
+                const minIndex = Math.min(startIndex, currentIndex);
+                const maxIndex = Math.max(startIndex, currentIndex);
+
+                selectedCells = [];
+                for (let i = minIndex; i <= maxIndex; i++) {
+                    selectedCells.push(`${startDay}_${times[i]}`);
+                }
+                updateCellSelections();
+            }
+        }
+
+        function setupGlobalMouseAndKeyEvents() {
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    clearActiveBrush();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isMouseDown && selectedCells.length > 0 && draggedServerId) {
+                    selectedCells.forEach(cellId => {
+                        assignServerToCell(draggedServerId, cellId);
+                    });
+                }
+                isMouseDown = false;
+                selectionStartCell = null;
+                selectedCells = [];
+                clearCellSelections();
+            });
+        }
+
+        function updateCellSelections() {
+            clearCellSelections();
+            selectedCells.forEach(id => {
+                const td = document.querySelector(`[data-cell-id="${id}"]`);
+                if (td) td.classList.add('selected-cell');
+            });
+        }
+
+        function clearCellSelections() {
+            document.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+        }
+
+        function getAllTimeSlots() {
+            const slots = [];
+            for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                for (let min of [0, 30]) {
+                    slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+                }
+            }
+            return slots;
+        }
+
+        // --- MODAIS E FORMULÁRIOS DE SERVIDOR ---
+        function openServerModal(serverId = null, isCentral = false) {
+            const modal = document.getElementById('modal-server');
+            const form = document.getElementById('form-server');
+            const title = document.getElementById('modal-title');
+
+            form.reset();
+            document.getElementById('server-is-central').value = isCentral ? 'true' : 'false';
+
+            const serverList = isCentral ? appState.centralDatabase : (getCurrentSector() ? getCurrentSector().servers : []);
+
+            if (serverId) {
+                const server = serverList.find(s => s.id === serverId);
+                if (server) {
+                    title.innerText = isCentral ? "Editar Servidor (Base Central)" : "Editar Servidor (Setor)";
+                    document.getElementById('server-id').value = server.id;
+                    document.getElementById('server-nickname').value = server.nickname;
+                    document.getElementById('server-fullname').value = server.fullname;
+                    document.getElementById('server-reg').value = server.reg || '';
+                    document.getElementById('server-role').value = server.role;
+                    document.getElementById('server-degree').value = server.degree || '';
+                    document.getElementById('server-hours').value = server.hours;
+                    document.getElementById('server-color').value = server.color;
+                }
+            } else {
+                title.innerText = isCentral ? "Novo Servidor (Base Central)" : "Novo Servidor no Setor";
+                document.getElementById('server-id').value = '';
+                suggestNewColor();
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeServerModal() {
+            document.getElementById('modal-server').classList.add('hidden');
+        }
+
+        function suggestNewColor() {
+            const randomColor = PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
+            document.getElementById('server-color').value = randomColor;
+        }
+
+        function renderColorPaletteSuggestions() {
+            const container = document.getElementById('color-palette-suggestions');
+            container.innerHTML = '';
+            PASTEL_COLORS.forEach(color => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-6 h-6 rounded-full border border-slate-300 transition transform hover:scale-110";
+                btn.style.backgroundColor = color;
+                btn.onclick = () => {
+                    document.getElementById('server-color').value = color;
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function saveServer(e) {
+            e.preventDefault();
+
+            const isCentral = document.getElementById('server-is-central').value === 'true';
+            const id = document.getElementById('server-id').value || 's_' + Date.now();
+            const nickname = document.getElementById('server-nickname').value.trim();
+            const fullname = document.getElementById('server-fullname').value.trim();
+            const reg = document.getElementById('server-reg').value.trim();
+            const role = document.getElementById('server-role').value.trim();
+            const degree = document.getElementById('server-degree').value.trim();
+            const hours = parseFloat(document.getElementById('server-hours').value);
+            const color = document.getElementById('server-color').value;
+
+            const targetList = isCentral ? appState.centralDatabase : getCurrentSector().servers;
+            const existingIndex = targetList.findIndex(s => s.id === id);
+            const createdAt = existingIndex >= 0 ? (targetList[existingIndex].createdAt || Date.now()) : Date.now();
+            const serverData = { id, nickname, fullname, reg, role, degree, hours, color, createdAt };
+
+            if (existingIndex >= 0) {
+                targetList[existingIndex] = serverData;
+            } else {
+                targetList.push(serverData);
+            }
+
+            saveToLocalStorage();
+            closeServerModal();
+
+            if (isCentral) {
+                renderCentralDatabaseTable();
+            } else {
+                renderServers();
+                renderScheduleTable();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function editServer(id) {
+            openServerModal(id, false);
+        }
+
+        function deleteServer(id) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (confirm("Deseja remover este servidor do setor atual? A grade dele será limpa neste setor.")) {
+                currentSector.servers = currentSector.servers.filter(s => s.id !== id);
+                clearServerSchedule(id, false);
+                saveToLocalStorage();
+                renderServers();
+                renderScheduleTable();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function clearServerSchedule(serverId, shouldConfirm = true) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (shouldConfirm && !confirm("Deseja remover todos os horários alocados para este servidor?")) {
+                return;
+            }
+
+            for (let cellId in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[cellId])) {
+                    currentSector.schedule[cellId] = currentSector.schedule[cellId].filter(alloc => alloc.serverId !== serverId);
+                    if (currentSector.schedule[cellId].length === 0) {
+                        delete currentSector.schedule[cellId];
+                    }
+                }
+            }
+
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function highlightServerSchedule(serverId) {
+            const blocks = document.querySelectorAll('.time-slot-block');
+            blocks.forEach(block => {
+                if (serverId === 'ALL' || block.dataset.serverId === serverId) {
+                    block.style.opacity = '1';
+                    block.classList.remove('grayscale');
+                } else {
+                    block.style.opacity = '0.15';
+                    block.classList.add('grayscale');
+                }
+            });
+        }
+
+        // --- IMPORTAÇÃO EXCEL / CSV ---
+        function openCsvHelpModal() {
+            document.getElementById('modal-csv-help').classList.remove('hidden');
+        }
+
+        function closeCsvHelpModal() {
+            document.getElementById('modal-csv-help').classList.add('hidden');
+        }
+
+        function triggerImportCsv() {
+            document.getElementById('import-csv-input').click();
+        }
+
+        function downloadCsvTemplate() {
+            const csvContent = "data:text/csv;charset=utf-8,Nome Fantasia,Nome Completo,Matrícula,Função,Titulação,Carga Horária,Cor\n" +
+                "Maria Souza,Maria de Souza Lima,10293,Matemática,Mestre,40,#e0f2fe\n" +
+                "João Carlos,João Carlos Ferreira,88392,Português,Doutor,20,#dcfce7\n";
+            
+            const encodedUri = encodeURI(csvContent);
+            const link = document.createElement("a");
+            link.setAttribute("href", encodedUri);
+            link.setAttribute("download", "modelo_servidores_diac_sga.csv");
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+        }
+
+        function importCsvData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const text = e.target.result;
+                    const lines = text.split(/\r\n|\n/);
+                    if (lines.length < 2) {
+                        alert("O arquivo selecionado está vazio.");
+                        return;
+                    }
+
+                    const separator = lines[0].includes(';') ? ';' : ',';
+                    let addedCount = 0;
+                    let timestampBase = Date.now();
+
+                    for (let i = 1; i < lines.length; i++) {
+                        const line = lines[i].trim();
+                        if (!line) continue;
+
+                        const cols = line.split(separator).map(col => col.replace(/^"|"$/g, '').trim());
+                        
+                        if (cols.length >= 4) {
+                            const nickname = cols[0];
+                            const fullname = cols[1] || nickname;
+                            const reg = cols[2] || '';
+                            const role = cols[3] || 'Servidor';
+                            const degree = cols[4] || '';
+                            const hours = parseFloat(cols[5]) || 40;
+                            const color = (cols[6] && cols[6].startsWith('#')) ? cols[6] : PASTEL_COLORS[Math.floor(Math.random() * PASTEL_COLORS.length)];
+
+                            if (nickname) {
+                                appState.centralDatabase.push({
+                                    id: 'cs_' + (timestampBase + i),
+                                    nickname,
+                                    fullname,
+                                    reg,
+                                    role,
+                                    degree,
+                                    hours,
+                                    color,
+                                    createdAt: timestampBase + i
+                                });
+                                addedCount++;
+                            }
+                        }
+                    }
+
+                    if (addedCount > 0) {
+                        saveToLocalStorage();
+                        renderCentralDatabaseTable();
+                        closeCsvHelpModal();
+                        alert(`${addedCount} servidor(es) importado(s) com sucesso para a Base Central!`);
+                    } else {
+                        alert("Nenhum servidor válido encontrado na planilha.");
+                    }
+
+                } catch (err) {
+                    alert("Erro ao ler o arquivo CSV.");
+                    console.error("Erro leitura CSV:", err);
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file, 'UTF-8');
+        }
+
+        // --- BACKUP JSON ---
+        function exportBackupData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
+            const downloadAnchor = document.createElement('a');
+            const fileName = `backup_horarios_diac_sga_${new Date().toISOString().slice(0,10)}.json`;
+            
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", fileName);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function triggerImportData() {
+            document.getElementById('import-file-input').click();
+        }
+
+        function importBackupData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (imported.sectors && imported.centralDatabase) {
+                        if (confirm("Deseja substituir as configurações atuais pelas do arquivo selecionado?")) {
+                            appState = imported;
+                            ensureIntervalServerExists();
+                            saveToLocalStorage();
+                            renderTabs();
+                            switchTab(appState.activeTab);
+                            alert("Dados restaurados com sucesso!");
+                        }
+                    } else {
+                        alert("Formato de backup inválido.");
+                    }
+                } catch (err) {
+                    alert("Erro ao ler o arquivo JSON.");
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- EXPORTAÇÃO PDF ---
+        function exportToPDF() {
+            const element = document.getElementById('pdf-container');
+            const removeButtons = element.querySelectorAll('button');
+            removeButtons.forEach(btn => btn.style.display = 'none');
+
+            const opt = {
+                margin:       [0.3, 0.3, 0.3, 0.3],
+                filename:     `Gestao_Horarios_${getCurrentSector().name}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                removeButtons.forEach(btn => btn.style.display = '');
+            }).catch(err => {
+                console.error("Erro PDF:", err);
+                removeButtons.forEach(btn => btn.style.display = '');
+            });
+        }
+
+        function getAdjustedColor(hex, percent) {
+            if (!hex || hex.length < 6) return '#64748b';
+            let num = parseInt(hex.replace('#', ''), 16),
+                amt = Math.round(2.55 * percent),
+                R = (num >> 16) + amt,
+                B = (num >> 8 & 0x00FF) + amt,
+                G = (num & 0x0000FF) + amt;
+
+            return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (B < 255 ? B < 1 ? 0 : B : 255) * 0x100 + (G < 255 ? G < 1 ? 0 : G : 255)).toString(16).slice(1);
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,2676 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestão de Horários - Diac/SGA</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts Inter -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <!-- html2pdf.js para Exportação PDF -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <!-- SheetJS (xlsx) para importação de planilhas Excel (.xlsx, .xls) -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+        @media print {
+            .no-print { display: none !important; }
+            body { background: white !important; font-size: 10pt; }
+            .print-full-width { width: 100% !important; max-width: 100% !important; margin: 0 !important; }
+            .schedule-cell { height: auto !important; min-height: 34px !important; }
+            .time-slot-block { padding: 1px 2px !important; font-size: 8pt !important; }
+            @page { size: A4 landscape; margin: 0.8cm; }
+        }
+
+        .dragging { opacity: 0.5; border: 2px dashed #3b82f6 !important; }
+        .drag-over { background-color: #e0f2fe !important; border: 2px dashed #0284c7 !important; }
+        
+        .selectable-cell { user-select: none; }
+        .selected-cell { background-color: #bae6fd !important; }
+
+        .slot-remoto {
+            background-color: #ffffff !important;
+            border-style: dashed !important;
+            border-width: 2px !important;
+        }
+
+        .active-brush-card {
+            ring: 3px !important;
+            ring-color: #2563eb !important;
+            border-color: #2563eb !important;
+            background-color: #eff6ff !important;
+            transform: scale(1.02);
+        }
+
+        @keyframes pulse-banner {
+            0%, 100% { opacity: 1; transform: translateY(0); }
+            50% { opacity: 0.95; transform: translateY(-1px); }
+        }
+        .banner-overload { animation: pulse-banner 2s infinite ease-in-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <header class="bg-slate-900 text-white shadow-lg sticky top-0 z-30 no-print">
+        <div class="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="bg-blue-600 p-2 rounded-lg text-white shadow-sm">
+                    <i class="fa-solid fa-calendar-days text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-lg leading-tight tracking-tight">Gestão de Horários</h1>
+                    <p class="text-xs text-slate-400 font-medium">Diac/SGA</p>
+                </div>
+            </div>
+
+            <!-- Botão de Cancelar Seleção (ESC) e Pincel -->
+            <div id="active-brush-bar" class="hidden flex items-center gap-2 bg-blue-900/80 border border-blue-500/50 px-3 py-1.5 rounded-lg">
+                <i class="fa-solid fa-paint-brush text-blue-300 animate-pulse text-xs"></i>
+                <span class="text-xs font-semibold text-blue-100">Pincel: <strong id="active-brush-name" class="text-white">--</strong></span>
+                <button onclick="clearActiveBrush()" class="ml-2 bg-red-500 hover:bg-red-600 text-white text-[10px] font-bold px-2 py-0.5 rounded shadow-2xs flex items-center gap-1 transition" title="Pressione ESC para cancelar">
+                    <span>ESC</span> <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+
+            <!-- Botões de Ação Principais -->
+            <div class="flex items-center space-x-2">
+                <button onclick="openSectorModal()" class="bg-amber-600 hover:bg-amber-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm" title="Criar um novo setor com cor exclusiva">
+                    <i class="fa-solid fa-folder-plus"></i> <span class="hidden sm:inline">Criar Setor</span>
+                </button>
+                <button onclick="exportToPDF()" class="bg-emerald-600 hover:bg-emerald-700 text-white px-3 py-1.5 sm:px-3.5 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm" title="Baixar grade formatada em PDF">
+                    <i class="fa-solid fa-file-pdf"></i> <span class="hidden sm:inline">Baixar PDF</span>
+                </button>
+                
+                <!-- Backup JSON -->
+                <button onclick="exportBackupData()" class="bg-indigo-600 hover:bg-indigo-700 text-white px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shadow-sm" title="Exportar backup completo em arquivo JSON">
+                    <i class="fa-solid fa-download"></i> <span class="hidden md:inline">Exportar JSON</span>
+                </button>
+                <button onclick="triggerImportData()" class="bg-violet-600 hover:bg-violet-700 text-white px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition shadow-sm" title="Importar backup JSON">
+                    <i class="fa-solid fa-upload"></i> <span class="hidden md:inline">Importar JSON</span>
+                </button>
+                <input type="file" id="import-file-input" accept=".json" onchange="importBackupData(event)" class="hidden">
+
+                <button onclick="window.print()" class="bg-slate-700 hover:bg-slate-600 text-slate-200 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-1.5 transition">
+                    <i class="fa-solid fa-print"></i> <span class="hidden lg:inline">Imprimir</span>
+                </button>
+            </div>
+        </div>
+
+        <div class="bg-slate-800/90 border-t border-slate-700/60 px-4 sm:px-6 lg:px-8">
+            <div class="max-w-[1700px] mx-auto flex items-center justify-between overflow-x-auto no-scrollbar">
+                <div id="sectors-tabs-container" class="flex items-center space-x-1 py-1.5">
+                    <!-- Abas injetadas via JavaScript -->
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div id="alerts-container" class="no-print max-w-[1700px] w-full mx-auto px-4 sm:px-6 pt-4 hidden">
+        <!-- Notificações geradas dinamicamente -->
+    </div>
+
+    <main class="flex-1 max-w-[1700px] w-full mx-auto p-4 sm:p-6 print-full-width">
+        
+        <!-- VISÃO 1: BASE DE DADOS CENTRAL "SERVIDORES" -->
+        <section id="central-database-section" class="hidden no-print space-y-4">
+            <div class="bg-white p-5 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4">
+                <div>
+                    <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
+                        <i class="fa-solid fa-database text-blue-600"></i> Base Central de Servidores
+                    </h2>
+                    <p class="text-xs text-slate-500">Cadastre, edite, ordene e sincronize servidores e lotações globalmente entre todos os setores.</p>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="openServerModal(null, true)" class="bg-blue-600 hover:bg-blue-700 text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                        <i class="fa-solid fa-user-plus"></i> Adicionar Servidor
+                    </button>
+                    <button onclick="openCsvHelpModal()" class="bg-teal-600 hover:bg-teal-700 text-white px-3.5 py-2 rounded-lg text-xs sm:text-sm font-medium flex items-center gap-2 transition shadow-sm">
+                        <i class="fa-solid fa-file-excel"></i> Importar Excel (.xlsx) / CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Barra de Ações em Lote para a Base Central -->
+            <div id="central-batch-bar" class="hidden bg-slate-900 text-white p-2.5 px-4 rounded-xl flex items-center justify-between shadow-md transition-all">
+                <div class="flex items-center gap-3">
+                    <span id="central-batch-count" class="text-xs font-bold bg-blue-600 px-2.5 py-1 rounded-full text-white">0 selecionados</span>
+                    <span class="text-xs text-slate-300">Servidores selecionados para exclusão em lote</span>
+                </div>
+                <div class="flex items-center gap-2">
+                    <button onclick="clearCentralSelection()" class="text-xs text-slate-300 hover:text-white px-2 py-1">Cancelar</button>
+                    <button onclick="deleteBatchCentralServers()" class="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg flex items-center gap-1.5 transition">
+                        <i class="fa-solid fa-trash-can"></i> Apagar Selecionados
+                    </button>
+                </div>
+            </div>
+
+            <div class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden">
+                <div class="p-3 bg-slate-50 border-b border-slate-200 flex flex-wrap items-center justify-between gap-3">
+                    <div class="flex flex-wrap items-center gap-3">
+                        <input type="text" id="search-central-server" oninput="renderCentralDatabaseTable()" placeholder="Buscar por nome, disciplina, matrícula..." class="text-xs bg-white border border-slate-300 rounded-lg px-3 py-1.5 w-56 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        
+                        <!-- FILTRO POR MÚLTIPLAS LOTAÇÕES NA BASE CENTRAL -->
+                        <div class="relative">
+                            <button id="btn-multi-location-dropdown" type="button" onclick="toggleLocationDropdown()" class="text-xs bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 font-medium text-slate-700 flex items-center gap-1.5 shadow-2xs hover:bg-slate-50">
+                                <i class="fa-solid fa-filter text-blue-600"></i>
+                                <span id="label-multi-location">Lotações: Todas</span>
+                                <i class="fa-solid fa-chevron-down text-[10px] text-slate-400 ml-1"></i>
+                            </button>
+
+                            <!-- Dropdown de Checkboxes de Lotação -->
+                            <div id="dropdown-multi-location" class="hidden absolute top-full mt-1 left-0 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-50 p-2 text-xs">
+                                <div class="flex items-center justify-between border-b pb-1.5 mb-1.5 text-[11px] font-bold text-slate-600">
+                                    <span>Filtrar por Lotação</span>
+                                    <div class="flex gap-2">
+                                        <button type="button" onclick="selectAllLocations(true)" class="text-blue-600 hover:underline">Todas</button>
+                                        <button type="button" onclick="selectAllLocations(false)" class="text-slate-400 hover:underline">Limpar</button>
+                                    </div>
+                                </div>
+                                <div id="location-checkboxes-container" class="max-h-48 overflow-y-auto space-y-1 pr-1">
+                                    <!-- Checkboxes injetadas via JS -->
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- ORDENAÇÃO NA BASE CENTRAL DE SERVIDORES -->
+                        <div class="flex items-center gap-1.5 bg-white border border-slate-300 rounded-lg p-1 px-2.5 shadow-2xs">
+                            <span class="text-[11px] font-bold text-slate-600 uppercase flex items-center gap-1">
+                                <i class="fa-solid fa-arrow-down-short-wide text-blue-600"></i> Ordenar:
+                            </span>
+                            <select id="central-sort-type" onchange="renderCentralDatabaseTable()" class="text-xs bg-transparent border-0 font-medium text-slate-700 focus:outline-none cursor-pointer">
+                                <option value="REGISTER">Ordem de Cadastro</option>
+                                <option value="NAME">Nome Fantasia (A-Z)</option>
+                                <option value="LOCATION">Lotação</option>
+                                <option value="HOURS">Carga Horária (h)</option>
+                            </select>
+                            <button id="central-sort-dir-btn" onclick="toggleCentralSortDirection()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 p-1 rounded text-xs px-2 font-semibold transition ml-1" title="Inverter ordem (Crescente / Decrescente)">
+                                <i id="central-sort-dir-icon" class="fa-solid fa-arrow-down-a-z"></i>
+                            </button>
+                        </div>
+
+                        <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none ml-2">
+                            <input type="checkbox" id="central-select-all" onchange="toggleSelectAllCentral(this.checked)" class="rounded text-blue-600">
+                            <span>Selecionar Todos</span>
+                        </label>
+                    </div>
+                    <span id="central-count-badge" class="text-xs font-semibold text-slate-500">0 servidores cadastrados</span>
+                </div>
+                <div class="overflow-x-auto">
+                    <table class="w-full text-left border-collapse text-xs">
+                        <thead>
+                            <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 font-bold">
+                                <th class="py-2.5 px-3 w-8 text-center">#</th>
+                                <th class="py-2.5 px-3">Cor Servidor</th>
+                                <th class="py-2.5 px-3">Nome Fantasia</th>
+                                <th class="py-2.5 px-3">Nome Completo</th>
+                                <th class="py-2.5 px-3">Lotação</th>
+                                <th class="py-2.5 px-3">Matrícula</th>
+                                <th class="py-2.5 px-3">Disciplina / Função</th>
+                                <th class="py-2.5 px-3">Titulação</th>
+                                <th class="py-2.5 px-3 text-center">Carga Horária</th>
+                                <th class="py-2.5 px-3 text-center">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="central-database-tbody" class="divide-y divide-slate-200">
+                            <!-- Injetado dinamicamente -->
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </section>
+
+        <!-- VISÃO 2: GRADE DE HORÁRIOS DO SETOR / CENÁRIO ATIVO -->
+        <section id="sector-view-section" class="grid grid-cols-1 lg:grid-cols-12 gap-6 print-full-width">
+            
+            <!-- Painel Lateral de Servidores do Setor -->
+            <aside class="lg:col-span-4 xl:col-span-3 flex flex-col gap-4 no-print">
+                <div class="bg-white rounded-xl shadow-sm border border-slate-200 p-4 flex flex-col h-[calc(100vh-10rem)] sticky top-28">
+                    
+                    <div class="flex items-center justify-between mb-2 pb-2 border-b border-slate-100">
+                        <div class="flex items-center gap-2">
+                            <i class="fa-solid fa-users text-slate-500"></i>
+                            <h2 class="font-semibold text-slate-800 text-sm">Quadro do Setor</h2>
+                            <span id="server-count" class="bg-slate-100 text-slate-600 text-xs px-2 py-0.5 rounded-full font-medium">0</span>
+                        </div>
+                        <div class="flex items-center gap-1">
+                            <button onclick="openServerModal()" class="text-xs text-blue-700 bg-blue-50 hover:bg-blue-100 border border-blue-200 px-2 py-0.5 rounded-md font-semibold" title="Adicionar ou importar servidor da Base Central">
+                                + Servidor
+                            </button>
+                            <button onclick="addIntervalQuickly()" class="text-xs text-amber-700 bg-amber-50 hover:bg-amber-100 border border-amber-200 px-2 py-0.5 rounded-md font-semibold" title="Usar Servidor INTERVALO (Pausa)">
+                                <i class="fa-solid fa-mug-hot"></i> Intervalo
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Barra de ferramentas do Quadro -->
+                    <div class="space-y-2 mb-2">
+                        <input type="text" id="search-server" oninput="renderServers()" placeholder="Buscar por nome, lotação, função..." class="w-full text-xs bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        
+                        <div class="flex items-center justify-between px-1 text-xs">
+                            <label class="flex items-center gap-1.5 cursor-pointer text-slate-600 select-none text-[11px]">
+                                <input type="checkbox" id="sector-select-all" onchange="toggleSelectAllSector(this.checked)" class="rounded text-blue-600">
+                                <span>Selecionar todos</span>
+                            </label>
+                            <button id="sector-batch-delete-btn" onclick="deleteBatchSectorServers()" class="hidden text-[11px] text-red-600 hover:text-red-800 font-semibold flex items-center gap-1 transition">
+                                <i class="fa-solid fa-trash-can"></i> Excluir (<span id="sector-batch-count">0</span>)
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Ordenação do Quadro Lateral -->
+                    <div class="bg-slate-50 p-2 rounded-lg border border-slate-200 mb-2 flex flex-col gap-1">
+                        <span class="text-[10px] font-bold text-slate-500 uppercase">Ordenar por:</span>
+                        <div class="flex items-center gap-1.5">
+                            <select id="sort-type" onchange="renderServers()" class="flex-1 text-xs bg-white border border-slate-200 rounded px-2 py-1 font-medium text-slate-700">
+                                <option value="REGISTER">Ordem de Cadastro</option>
+                                <option value="NAME">Nome Fantasia (A-Z)</option>
+                                <option value="LOCATION">Lotação</option>
+                                <option value="HOURS">Carga Horária (h)</option>
+                                <option value="GRID_USAGE">Aparições na Grade</option>
+                            </select>
+                            <button id="sort-dir-btn" onclick="toggleSortDirection()" class="bg-white border border-slate-200 text-slate-600 hover:bg-slate-100 p-1 rounded text-xs px-2 font-semibold">
+                                <i id="sort-dir-icon" class="fa-solid fa-arrow-down-a-z"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Lista dos Servidores -->
+                    <div id="servers-list" class="flex-1 overflow-y-auto space-y-2 pr-1"></div>
+                </div>
+            </aside>
+
+            <section class="lg:col-span-8 xl:col-span-9 flex flex-col gap-4 print-full-width">
+                
+                <div class="bg-white p-3 rounded-xl shadow-sm border border-slate-200 flex flex-wrap items-center justify-between gap-4 no-print">
+                    
+                    <div class="flex items-center gap-2">
+                        <span id="sector-color-badge" class="w-4 h-4 rounded-full border border-slate-300 shadow-2xs"></span>
+                        <span id="sector-title-display" class="font-bold text-sm text-slate-800">Setor</span>
+                        
+                        <button onclick="openSectorModal(getCurrentSector()?.id)" class="text-xs bg-slate-100 hover:bg-blue-50 text-slate-700 hover:text-blue-700 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 transition shadow-2xs" title="Editar nome e cor do setor">
+                            <i class="fa-solid fa-pen-to-square text-blue-600"></i> <span>Editar Setor</span>
+                        </button>
+                        
+                        <button id="btn-delete-current-sector" onclick="deleteSector(getCurrentSector()?.id)" class="text-xs bg-slate-100 hover:bg-red-50 text-slate-700 hover:text-red-700 px-2.5 py-1 rounded-lg border border-slate-200 flex items-center gap-1 transition shadow-2xs" title="Excluir este setor">
+                            <i class="fa-solid fa-trash-can text-red-500"></i> <span>Excluir</span>
+                        </button>
+
+                        <div class="h-4 w-px bg-slate-200 mx-1"></div>
+                        <span class="text-xs font-semibold text-slate-600">Filtrar:</span>
+                        <select id="filter-server-highlight" onchange="highlightServerSchedule(this.value)" class="bg-slate-50 border border-slate-200 text-xs font-medium rounded-lg px-2.5 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="ALL">Todos os Servidores</option>
+                        </select>
+                    </div>
+
+                    <!-- SELETOR DAS TRÊS OPÇÕES DE HORÁRIOS: 30 MIN, 45 MIN E 1 HORA -->
+                    <div class="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200">
+                        <span class="text-[11px] font-bold text-slate-500 px-1">Exibição:</span>
+                        <button id="btn-view-30" onclick="setGridInterval('30')" class="px-2.5 py-1 rounded text-xs font-semibold transition bg-blue-600 text-white shadow-xs">
+                            30 Min
+                        </button>
+                        <button id="btn-view-45" onclick="setGridInterval('45')" class="px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200">
+                            45 Min
+                        </button>
+                        <button id="btn-view-60" onclick="setGridInterval('60')" class="px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200">
+                            1 Hora
+                        </button>
+                    </div>
+
+                    <div class="flex items-center gap-4 text-xs text-slate-500">
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-3.5 h-3.5 rounded border-2 border-dashed border-blue-600 bg-white inline-block"></span>
+                            <span class="font-medium text-slate-700">Remoto</span>
+                        </div>
+                        <div class="flex items-center gap-1.5">
+                            <span class="w-3.5 h-3.5 rounded bg-blue-200 border border-blue-400 inline-block"></span>
+                            <span>Presencial</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tabela de Horários -->
+                <div id="pdf-container" class="bg-white rounded-xl shadow-sm border border-slate-200 overflow-hidden print-full-width p-2">
+                    <div class="hidden print:block mb-4 text-center border-b pb-2">
+                        <h2 id="print-sector-title" class="text-xl font-bold text-slate-800">Gestão de Horários - Diac/SGA</h2>
+                        <p class="text-xs text-slate-500">Quadro Horário Semanal Integrado dos Servidores</p>
+                    </div>
+                    
+                    <div class="overflow-x-auto overflow-y-auto max-h-[calc(100vh-13.5rem)] print:max-h-none">
+                        <table class="w-full border-collapse text-left text-xs min-w-[750px]">
+                            <thead>
+                                <tr class="bg-slate-100 border-b border-slate-200 text-slate-700 sticky top-0 z-20 shadow-xs">
+                                    <th class="py-2.5 px-2 w-28 text-center font-bold border-r border-slate-200 bg-slate-100">
+                                        <i class="fa-regular fa-clock mr-1"></i> Horário
+                                    </th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">SEG</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">TER</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUA</th>
+                                    <th class="py-2.5 px-2 text-center font-bold border-r border-slate-200 w-1/5">QUI</th>
+                                    <th class="py-2.5 px-2 text-center font-bold w-1/5">SEX</th>
+                                </tr>
+                            </thead>
+                            <tbody id="schedule-body" class="divide-y divide-slate-200">
+                                <!-- Gerado via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </section>
+        </section>
+    </main>
+
+    <!-- MODAL DE CADASTRO/EDIÇÃO/IMPORTAÇÃO DE SERVIDOR -->
+    <div id="modal-server" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-md overflow-hidden p-6 max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-3">
+                <h3 id="modal-title" class="text-lg font-bold text-slate-800">Cadastrar Servidor</h3>
+                <button onclick="closeServerModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <!-- Seletor de Modo no Setor: Manual vs Importar da Base Central -->
+            <div id="server-modal-mode-tabs" class="hidden mb-3 bg-slate-100 p-1 rounded-lg flex text-xs font-semibold">
+                <button type="button" id="btn-tab-mode-manual" onclick="setServerModalMode('MANUAL')" class="flex-1 py-1.5 rounded-md bg-white text-blue-600 shadow-2xs">
+                    Novo Servidor (Manual)
+                </button>
+                <button type="button" id="btn-tab-mode-import" onclick="setServerModalMode('IMPORT')" class="flex-1 py-1.5 rounded-md text-slate-600 hover:text-slate-900">
+                    <i class="fa-solid fa-cloud-arrow-down mr-1"></i> Importar da Base Central
+                </button>
+            </div>
+
+            <!-- PAINEL 1: IMPORTAR DA BASE CENTRAL -->
+            <div id="server-import-from-central-panel" class="hidden space-y-3">
+                <p class="text-xs text-slate-500">Selecione um servidor já cadastrado na Base Central para inseri-lo no quadro deste setor:</p>
+                <input type="text" id="search-import-server-input" oninput="renderImportableServersList()" placeholder="Buscar servidor por nome, função ou lotação..." class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div id="importable-servers-container" class="max-h-60 overflow-y-auto space-y-1.5 pr-1">
+                    <!-- Servidores injetados via JS -->
+                </div>
+                <div class="flex justify-end pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeServerModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                </div>
+            </div>
+
+            <!-- PAINEL 2: FORMULÁRIO MANUAL (CADASTRO / EDIÇÃO) -->
+            <form id="form-server" onsubmit="saveServer(event)" class="space-y-3">
+                <input type="hidden" id="server-id">
+                <input type="hidden" id="server-is-central">
+                
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Fantasia / Apelido *</label>
+                    <input type="text" id="server-nickname" required placeholder="Ex: João Silva" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome Completo *</label>
+                    <input type="text" id="server-fullname" required placeholder="Ex: João da Silva Santos" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <!-- LOTAÇÃO COM ESCOLHA DE COR, TONS SUAVES E PROPAGAÇÃO GLOBAL -->
+                <div class="bg-slate-50 p-2.5 rounded-xl border border-slate-200 space-y-2">
+                    <div class="grid grid-cols-2 gap-2">
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-700 mb-1">Lotação (Setor/Coord.) *</label>
+                            <input type="text" id="server-location" required oninput="handleLocationNameInput(this.value)" placeholder="Ex: DIAC, TI, COENG" class="w-full bg-white border border-slate-300 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] font-bold text-slate-700 mb-1">Cor da Lotação</label>
+                            <div class="flex items-center gap-2">
+                                <input type="color" id="server-location-color" value="#e0e7ff" class="h-8 w-10 rounded border border-slate-300 cursor-pointer p-0.5">
+                                <button type="button" onclick="suggestLocationColor()" class="bg-white hover:bg-slate-100 text-slate-700 px-2 py-1.5 rounded text-xs border border-slate-200 flex-1 transition text-[11px]">
+                                    Sugerir
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="flex items-center justify-between">
+                        <span class="block text-[10px] text-slate-500 font-semibold">Tons suaves para Lotação:</span>
+                        <span class="text-[9px] text-blue-600 font-medium"><i class="fa-solid fa-arrows-rotate mr-0.5"></i>Atualiza todas com o mesmo nome</span>
+                    </div>
+                    <div class="flex flex-wrap gap-1.5" id="location-color-palette-suggestions"></div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Matrícula</label>
+                        <input type="text" id="server-reg" placeholder="Ex: 123456" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Carga Horária (h) *</label>
+                        <input type="number" id="server-hours" min="0.5" step="0.5" required placeholder="Ex: 40" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-2">
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Disciplina / Função *</label>
+                        <input type="text" id="server-role" required placeholder="Ex: Matemática" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1">Titulação</label>
+                        <input type="text" id="server-degree" placeholder="Ex: Mestre / Doutor" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    </div>
+                </div>
+
+                <!-- COR DO SERVIDOR -->
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Cor do Card do Servidor *</label>
+                    <div class="flex gap-2 items-center mb-1.5">
+                        <input type="color" id="server-color" class="h-8 w-10 rounded border border-slate-300 cursor-pointer p-0.5">
+                        <button type="button" onclick="suggestNewColor()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2 py-1 rounded text-xs flex-1 transition">
+                            <i class="fa-solid fa-wand-magic-sparkles mr-1"></i> Sugerir Cor
+                        </button>
+                    </div>
+                    <span class="block text-xs text-slate-500 mb-1">Sugestões de tons suaves do Servidor:</span>
+                    <div class="flex flex-wrap gap-1.5" id="color-palette-suggestions"></div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeServerModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                    <button type="submit" class="px-4 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-xs font-medium shadow-sm">Salvar Servidor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL DE CRIAÇÃO / EDIÇÃO DE SETOR (COM IMPORTAÇÃO POR LOTAÇÃO) -->
+    <div id="modal-sector" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-md overflow-hidden p-6 max-h-[92vh] overflow-y-auto">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                <h3 id="sector-modal-title" class="text-lg font-bold text-slate-800">Criar Novo Setor</h3>
+                <button onclick="closeSectorModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <form onsubmit="handleSectorSubmit(event)" class="space-y-4">
+                <input type="hidden" id="edit-sector-id">
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Nome do Setor / Cenário *</label>
+                    <input type="text" id="sector-name-input" required placeholder="Ex: Diretoria Acadêmica, Coordenação TI" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Cor Identificadora do Setor *</label>
+                    <div class="flex items-center gap-2 mb-2">
+                        <input type="color" id="sector-color-input" value="#2563eb" class="h-8 w-12 rounded border border-slate-300 cursor-pointer p-0.5">
+                        <button type="button" onclick="suggestUniqueSectorColor()" class="bg-slate-100 hover:bg-slate-200 text-slate-700 px-2.5 py-1.5 rounded-lg text-xs font-medium transition flex items-center gap-1.5">
+                            <i class="fa-solid fa-wand-magic-sparkles text-amber-500"></i> Cor Única
+                        </button>
+                    </div>
+
+                    <span class="block text-[11px] text-slate-500 mb-1">Sugestões de cores para setores:</span>
+                    <div class="flex flex-wrap gap-1.5" id="sector-color-palette-suggestions"></div>
+                </div>
+
+                <!-- ORIGEM DOS SERVIDORES COM OPÇÃO POR LOTAÇÃO -->
+                <div id="sector-source-container">
+                    <label class="block text-xs font-semibold text-slate-600 mb-1">Origem dos Servidores *</label>
+                    <select id="sector-copy-source" onchange="handleSectorSourceChange(this.value)" class="w-full bg-slate-50 border border-slate-300 rounded-lg px-3 py-2 text-xs focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="CENTRAL">Copiar todos os servidores da Base Central ("SERVIDORES")</option>
+                        <option value="BY_LOCATION">Filtrar e importar por Lotação(ões)...</option>
+                        <option value="EMPTY">Criar quadro do setor em branco (sem servidores)</option>
+                    </select>
+
+                    <!-- Painel de Seleção Múltipla de Lotação ao Criar Setor -->
+                    <div id="sector-locations-filter-panel" class="hidden mt-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl space-y-2">
+                        <div class="flex items-center justify-between text-[11px] font-bold text-slate-700">
+                            <span>Selecione as Lotações a importar:</span>
+                            <div class="flex gap-2 text-[10px]">
+                                <button type="button" onclick="toggleAllSectorSourceLocations(true)" class="text-blue-600 hover:underline">Todas</button>
+                                <button type="button" onclick="toggleAllSectorSourceLocations(false)" class="text-slate-400 hover:underline">Nenhuma</button>
+                            </div>
+                        </div>
+                        <div id="sector-source-locations-list" class="max-h-36 overflow-y-auto space-y-1 pr-1 text-xs">
+                            <!-- Injetado dinamicamente -->
+                        </div>
+                    </div>
+                </div>
+
+                <div class="flex justify-end gap-2 pt-3 border-t border-slate-100">
+                    <button type="button" onclick="closeSectorModal()" class="px-3 py-1.5 rounded-lg text-xs text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                    <button type="submit" id="sector-modal-submit-btn" class="px-4 py-1.5 bg-amber-600 hover:bg-amber-700 text-white rounded-lg text-xs font-medium shadow-sm">Salvar Setor</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL IMPORTAÇÃO CSV / EXCEL (.XLSX) -->
+    <div id="modal-csv-help" class="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center hidden no-print">
+        <div class="bg-white rounded-2xl shadow-xl border border-slate-100 w-full max-w-lg overflow-hidden p-6">
+            <div class="flex justify-between items-center pb-3 border-b border-slate-100 mb-4">
+                <div class="flex items-center gap-2 text-teal-700">
+                    <i class="fa-solid fa-file-excel text-2xl"></i>
+                    <h3 class="text-lg font-bold text-slate-800">Importar Excel (.xlsx) ou CSV</h3>
+                </div>
+                <button onclick="closeCsvHelpModal()" class="text-slate-400 hover:text-slate-600 p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4 text-xs text-slate-600">
+                <p>Suporta importação direta de arquivos <strong>.xlsx, .xls ou .csv</strong> com total compatibilidade para caracteres especiais e acentos (ex: <em>ç, ã, é, ó, ú</em>).</p>
+                
+                <div class="bg-slate-50 p-3 rounded-lg border border-slate-200">
+                    <span class="font-bold text-slate-700 block mb-1">Cabeçalhos suportados na 1ª linha da planilha:</span>
+                    <div class="bg-white p-2 rounded border border-slate-300 font-mono text-[11px] overflow-x-auto text-slate-700">
+                        Nome Fantasia, Nome Completo, Lotação, Cor Lotação, Matrícula, Função, Titulação, Carga Horária, Cor
+                    </div>
+                </div>
+
+                <div class="flex justify-between items-center pt-1">
+                    <button type="button" onclick="downloadCsvTemplate()" class="text-teal-700 hover:text-teal-900 font-semibold flex items-center gap-1">
+                        <i class="fa-solid fa-download"></i> Baixar Planilha Modelo (.csv / Excel)
+                    </button>
+                </div>
+            </div>
+
+            <div class="flex justify-end gap-2 pt-4 border-t border-slate-100 mt-4">
+                <button type="button" onclick="closeCsvHelpModal()" class="px-4 py-2 rounded-lg text-sm text-slate-600 hover:bg-slate-100 font-medium">Cancelar</button>
+                <button type="button" onclick="triggerImportCsv()" class="px-4 py-2 bg-teal-600 hover:bg-teal-700 text-white rounded-lg text-sm font-medium flex items-center gap-2 shadow-sm">
+                    <i class="fa-solid fa-upload"></i> Selecionar Arquivo (.xlsx / .csv)
+                </button>
+                <input type="file" id="import-csv-input" accept=".xlsx, .xls, .csv, .txt" onchange="importSpreadsheetData(event)" class="hidden">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const DAYS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
+        const START_HOUR = 7;
+        const END_HOUR = 22;
+        const INTERVAL_SERVER_ID = 's_intervalo';
+
+        const SOFT_PASTEL_COLORS = [
+            '#e0f2fe', '#dcfce7', '#fef9c3', '#ffe4e6', '#f3e8ff', 
+            '#ffedd5', '#e0e7ff', '#ccfbf1', '#fae8ff', '#f1f5f9', '#fce7f3', '#ecfdf5'
+        ];
+
+        const SECTOR_DISTINCT_COLORS = [
+            '#2563eb', '#059669', '#d97706', '#7c3aed', '#dc2626', 
+            '#0891b2', '#ea580c', '#4f46e5', '#db2777', '#475569', '#65a30d', '#9333ea'
+        ];
+
+        let appState = {
+            activeTab: 'CENTRAL',
+            centralDatabase: [],
+            sectors: [],
+            gridIntervalMinutes: 30
+        };
+
+        let draggedServerId = null;
+        let activeBrushServerId = null;
+        let isMouseDown = false;
+        let selectionStartCell = null;
+        let selectedCells = [];
+        
+        let sortAscending = true;            // Direção do Quadro Lateral
+        let centralSortAscending = true;     // Direção da Base Central
+
+        let selectedCentralServerIds = new Set();
+        let selectedSectorServerIds = new Set();
+
+        // Conjunto de lotações selecionadas no filtro da Base Central (vazio = todas)
+        let activeLocationFilters = new Set();
+
+        window.onload = function() {
+            loadFromLocalStorage();
+            ensureIntervalServerExists();
+            ensureDefaultTurnBreaksPreFilled();
+            renderTabs();
+            switchTab(appState.activeTab);
+            renderColorPaletteSuggestions();
+            renderLocationColorSuggestions();
+            renderSectorColorSuggestions();
+            setupGlobalMouseAndKeyEvents();
+            updateGridIntervalButtons();
+        };
+
+        // Fecha o dropdown de lotações se o usuário clicar fora
+        document.addEventListener('click', function(e) {
+            const dropdown = document.getElementById('dropdown-multi-location');
+            const btn = document.getElementById('btn-multi-location-dropdown');
+            if (dropdown && !dropdown.contains(e.target) && !btn.contains(e.target)) {
+                dropdown.classList.add('hidden');
+            }
+        });
+
+        // --- LOCALSTORAGE ---
+        function saveToLocalStorage() {
+            localStorage.setItem('diac_sga_appstate_v8', JSON.stringify(appState));
+        }
+
+        function loadFromLocalStorage() {
+            const saved = localStorage.getItem('diac_sga_appstate_v8') || localStorage.getItem('diac_sga_appstate_v7') || localStorage.getItem('diac_sga_appstate_v6') || localStorage.getItem('diac_sga_appstate_v5') || localStorage.getItem('diac_sga_appstate_v2');
+            if (saved) {
+                try {
+                    appState = JSON.parse(saved);
+                    if (appState.centralDatabase) {
+                        appState.centralDatabase.forEach(s => {
+                            if (!s.location) s.location = 'DIAC';
+                            if (!s.locationColor) s.locationColor = '#e0e7ff';
+                        });
+                    }
+                    if (appState.sectors) {
+                        appState.sectors.forEach((sec, idx) => {
+                            if (!sec.color) sec.color = SECTOR_DISTINCT_COLORS[idx % SECTOR_DISTINCT_COLORS.length];
+                            sec.servers.forEach(s => {
+                                if (!s.location) s.location = sec.name;
+                                if (!s.locationColor) s.locationColor = '#e0e7ff';
+                            });
+                        });
+                    }
+                } catch(e) {
+                    console.error("Erro ao carregar dados salvos:", e);
+                }
+            } else {
+                appState.centralDatabase = [
+                    { id: 'cs1', nickname: 'Ana Silva', fullname: 'Ana Clara Silva', location: 'DIAC/Matemática', locationColor: '#e0f2fe', reg: '10293', role: 'Matemática', degree: 'Mestre', hours: 20, color: '#e0f2fe', createdAt: 1 },
+                    { id: 'cs2', nickname: 'Carlos Souza', fullname: 'Carlos Eduardo Souza', location: 'Coordenação TI', locationColor: '#dcfce7', reg: '88392', role: 'TI / Suporte', degree: 'Especialista', hours: 40, color: '#dcfce7', createdAt: 2 },
+                    { id: 'cs3', nickname: 'Mariana Costa', fullname: 'Mariana Luz Costa', location: 'DIAC/Linguagens', locationColor: '#fef9c3', reg: '47281', role: 'Português', degree: 'Doutora', hours: 30, color: '#fef9c3', createdAt: 3 }
+                ];
+
+                appState.sectors = [
+                    {
+                        id: 'sec_default',
+                        name: 'Diretoria Acadêmica',
+                        color: '#2563eb',
+                        servers: JSON.parse(JSON.stringify(appState.centralDatabase)),
+                        schedule: {}
+                    }
+                ];
+                appState.activeTab = 'sec_default';
+            }
+        }
+
+        function ensureIntervalServerExists() {
+            let intervalInCentral = appState.centralDatabase.find(s => s.id === INTERVAL_SERVER_ID);
+            if (!intervalInCentral) {
+                appState.centralDatabase.unshift({
+                    id: INTERVAL_SERVER_ID,
+                    nickname: 'INTERVALO',
+                    fullname: 'Intervalo Intramapeamento / Almoço',
+                    location: 'Geral',
+                    locationColor: '#f1f5f9',
+                    reg: 'N/A',
+                    role: 'Pausa / Almoço',
+                    degree: 'N/A',
+                    hours: 10,
+                    color: '#e2e8f0',
+                    createdAt: 0
+                });
+            }
+
+            appState.sectors.forEach(sec => {
+                let intervalInSec = sec.servers.find(s => s.id === INTERVAL_SERVER_ID);
+                if (!intervalInSec) {
+                    sec.servers.unshift({
+                        id: INTERVAL_SERVER_ID,
+                        nickname: 'INTERVALO',
+                        fullname: 'Intervalo Intramapeamento / Almoço',
+                        location: 'Geral',
+                        locationColor: '#f1f5f9',
+                        reg: 'N/A',
+                        role: 'Pausa / Almoço',
+                        degree: 'N/A',
+                        hours: 10,
+                        color: '#e2e8f0',
+                        createdAt: 0
+                    });
+                }
+            });
+
+            saveToLocalStorage();
+        }
+
+        function ensureDefaultTurnBreaksPreFilled() {
+            appState.sectors.forEach(sec => {
+                if (!sec.schedule) sec.schedule = {};
+                if (!sec.initializedBreaks) {
+                    DAYS.forEach(day => {
+                        ['12:00', '12:30'].forEach(t => {
+                            const k = `${day}_${t}`;
+                            if (!sec.schedule[k]) sec.schedule[k] = [];
+                            if (!sec.schedule[k].some(a => a.serverId === INTERVAL_SERVER_ID)) {
+                                sec.schedule[k].push({ serverId: INTERVAL_SERVER_ID, isRemote: false });
+                            }
+                        });
+
+                        const k18 = `${day}_18:00`;
+                        if (!sec.schedule[k18]) sec.schedule[k18] = [];
+                        if (!sec.schedule[k18].some(a => a.serverId === INTERVAL_SERVER_ID)) {
+                            sec.schedule[k18].push({ serverId: INTERVAL_SERVER_ID, isRemote: false });
+                        }
+                    });
+                    sec.initializedBreaks = true;
+                }
+            });
+            saveToLocalStorage();
+        }
+
+        // --- SISTEMA DE ABAS ---
+        function renderTabs() {
+            const container = document.getElementById('sectors-tabs-container');
+            container.innerHTML = '';
+
+            const centralBtn = document.createElement('button');
+            const isCentralActive = appState.activeTab === 'CENTRAL';
+            centralBtn.className = `px-3 py-1.5 rounded-lg text-xs font-bold transition flex items-center gap-1.5 ${
+                isCentralActive 
+                    ? 'bg-blue-600 text-white shadow-sm' 
+                    : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+            }`;
+            centralBtn.innerHTML = `<i class="fa-solid fa-database text-amber-300"></i> SERVIDORES (Base Central)`;
+            centralBtn.onclick = () => switchTab('CENTRAL');
+            container.appendChild(centralBtn);
+
+            const divider = document.createElement('span');
+            divider.className = "h-4 w-px bg-slate-700 mx-1";
+            container.appendChild(divider);
+
+            appState.sectors.forEach((sec) => {
+                const isActive = appState.activeTab === sec.id;
+                const tabGroup = document.createElement('div');
+                tabGroup.className = "flex items-center group bg-slate-800/60 rounded-lg p-0.5 border border-slate-700/50";
+
+                const secColor = sec.color || '#2563eb';
+
+                const secBtn = document.createElement('button');
+                secBtn.className = `px-3 py-1.5 rounded-lg text-xs font-semibold transition flex items-center gap-2 ${
+                    isActive 
+                        ? 'bg-slate-100 text-slate-900 font-bold shadow-sm' 
+                        : 'text-slate-300 hover:bg-slate-700 hover:text-white'
+                }`;
+                secBtn.innerHTML = `
+                    <span class="w-2.5 h-2.5 rounded-full inline-block" style="background-color: ${secColor}"></span>
+                    <span>${sec.name}</span>
+                `;
+                secBtn.onclick = () => switchTab(sec.id);
+                tabGroup.appendChild(secBtn);
+
+                const editBtn = document.createElement('button');
+                editBtn.className = "text-slate-400 hover:text-blue-300 p-1 text-[11px] opacity-60 group-hover:opacity-100 transition";
+                editBtn.innerHTML = `<i class="fa-solid fa-pen"></i>`;
+                editBtn.title = `Editar setor ${sec.name}`;
+                editBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    openSectorModal(sec.id);
+                };
+                tabGroup.appendChild(editBtn);
+
+                if (appState.sectors.length > 1) {
+                    const delBtn = document.createElement('button');
+                    delBtn.className = "text-slate-400 hover:text-red-400 p-1 text-[11px] opacity-60 group-hover:opacity-100 transition";
+                    delBtn.innerHTML = `<i class="fa-solid fa-xmark"></i>`;
+                    delBtn.title = `Excluir o setor ${sec.name}`;
+                    delBtn.onclick = (e) => {
+                        e.stopPropagation();
+                        deleteSector(sec.id);
+                    };
+                    tabGroup.appendChild(delBtn);
+                }
+
+                container.appendChild(tabGroup);
+            });
+        }
+
+        function switchTab(tabId) {
+            appState.activeTab = tabId;
+            saveToLocalStorage();
+            renderTabs();
+            clearActiveBrush();
+            clearCentralSelection();
+            clearSectorSelection();
+
+            const centralSec = document.getElementById('central-database-section');
+            const sectorSec = document.getElementById('sector-view-section');
+
+            if (tabId === 'CENTRAL') {
+                centralSec.classList.remove('hidden');
+                sectorSec.classList.add('hidden');
+                populateCentralLocationFilter();
+                renderCentralDatabaseTable();
+            } else {
+                centralSec.classList.add('hidden');
+                sectorSec.classList.remove('hidden');
+                
+                const currentSector = getCurrentSector();
+                if (currentSector) {
+                    document.getElementById('print-sector-title').innerText = `Gestão de Horários - ${currentSector.name}`;
+                    document.getElementById('sector-title-display').innerText = currentSector.name;
+                    document.getElementById('sector-color-badge').style.backgroundColor = currentSector.color || '#2563eb';
+                    
+                    const delSectorBtn = document.getElementById('btn-delete-current-sector');
+                    if (appState.sectors.length > 1) {
+                        delSectorBtn.classList.remove('hidden');
+                    } else {
+                        delSectorBtn.classList.add('hidden');
+                    }
+                }
+
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function getCurrentSector() {
+            return appState.sectors.find(s => s.id === appState.activeTab) || appState.sectors[0];
+        }
+
+        // --- GESTÃO DE SETORES & CRIAÇÃO COM FILTRO DE LOTAÇÃO ---
+        function getNextAvailableSectorColor() {
+            const usedColors = appState.sectors.map(s => s.color?.toLowerCase());
+            for (let c of SECTOR_DISTINCT_COLORS) {
+                if (!usedColors.includes(c.toLowerCase())) {
+                    return c;
+                }
+            }
+            return SECTOR_DISTINCT_COLORS[Math.floor(Math.random() * SECTOR_DISTINCT_COLORS.length)];
+        }
+
+        function getAllUniqueLocations() {
+            const locs = new Set();
+            appState.centralDatabase.forEach(s => {
+                if (s.id !== INTERVAL_SERVER_ID && s.location && s.location.trim()) {
+                    locs.add(s.location.trim());
+                }
+            });
+            return Array.from(locs).sort((a,b) => a.localeCompare(b, 'pt-BR'));
+        }
+
+        function openSectorModal(sectorId = null) {
+            const modal = document.getElementById('modal-sector');
+            const title = document.getElementById('sector-modal-title');
+            const nameInput = document.getElementById('sector-name-input');
+            const colorInput = document.getElementById('sector-color-input');
+            const idInput = document.getElementById('edit-sector-id');
+            const sourceContainer = document.getElementById('sector-source-container');
+            const submitBtn = document.getElementById('sector-modal-submit-btn');
+
+            if (sectorId) {
+                const sec = appState.sectors.find(s => s.id === sectorId);
+                if (!sec) return;
+                title.innerText = "Editar Setor / Cenário";
+                submitBtn.innerText = "Salvar Alterações";
+                idInput.value = sec.id;
+                nameInput.value = sec.name;
+                colorInput.value = sec.color || '#2563eb';
+                sourceContainer.classList.add('hidden');
+            } else {
+                title.innerText = "Criar Novo Setor / Cenário";
+                submitBtn.innerText = "Criar Setor";
+                idInput.value = '';
+                nameInput.value = '';
+                colorInput.value = getNextAvailableSectorColor();
+                sourceContainer.classList.remove('hidden');
+
+                const select = document.getElementById('sector-copy-source');
+                select.innerHTML = `
+                    <option value="CENTRAL">Copiar todos os servidores da Base Central ("SERVIDORES")</option>
+                    <option value="BY_LOCATION">Filtrar e importar por Lotação(ões)...</option>
+                    <option value="EMPTY">Criar quadro do setor em branco (sem servidores)</option>
+                `;
+
+                appState.sectors.forEach(sec => {
+                    const opt = document.createElement('option');
+                    opt.value = `SEC_${sec.id}`;
+                    opt.innerText = `Copiar do Cenário: ${sec.name}`;
+                    select.appendChild(opt);
+                });
+
+                handleSectorSourceChange(select.value);
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeSectorModal() {
+            document.getElementById('modal-sector').classList.add('hidden');
+        }
+
+        function handleSectorSourceChange(sourceVal) {
+            const panel = document.getElementById('sector-locations-filter-panel');
+            if (sourceVal === 'BY_LOCATION') {
+                panel.classList.remove('hidden');
+                renderSectorSourceLocationsCheckboxes();
+            } else {
+                panel.classList.add('hidden');
+            }
+        }
+
+        function renderSectorSourceLocationsCheckboxes() {
+            const container = document.getElementById('sector-source-locations-list');
+            container.innerHTML = '';
+            const locations = getAllUniqueLocations();
+
+            if (locations.length === 0) {
+                container.innerHTML = `<span class="text-slate-400">Nenhuma lotação cadastrada na Base Central.</span>`;
+                return;
+            }
+
+            locations.forEach(loc => {
+                const color = findColorByLocation(loc) || '#e0e7ff';
+                const count = appState.centralDatabase.filter(s => s.location && s.location.trim() === loc && s.id !== INTERVAL_SERVER_ID).length;
+                const div = document.createElement('label');
+                div.className = "flex items-center justify-between p-1.5 rounded hover:bg-white cursor-pointer transition border border-transparent hover:border-slate-200";
+                div.innerHTML = `
+                    <div class="flex items-center gap-2">
+                        <input type="checkbox" value="${loc}" class="sector-source-loc-cb rounded text-blue-600">
+                        <span class="w-3 h-3 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${color}"></span>
+                        <span class="font-medium text-slate-700">${loc}</span>
+                    </div>
+                    <span class="text-[10px] text-slate-400 font-semibold">${count} servidores</span>
+                `;
+                container.appendChild(div);
+            });
+        }
+
+        function toggleAllSectorSourceLocations(select) {
+            document.querySelectorAll('.sector-source-loc-cb').forEach(cb => cb.checked = select);
+        }
+
+        function suggestUniqueSectorColor() {
+            document.getElementById('sector-color-input').value = getNextAvailableSectorColor();
+        }
+
+        function renderSectorColorSuggestions() {
+            const container = document.getElementById('sector-color-palette-suggestions');
+            if (!container) return;
+            container.innerHTML = '';
+            
+            SECTOR_DISTINCT_COLORS.forEach(color => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-6 h-6 rounded-full border border-slate-300 transition transform hover:scale-110 shadow-2xs";
+                btn.style.backgroundColor = color;
+                btn.title = `Escolher cor ${color}`;
+                btn.onclick = () => {
+                    document.getElementById('sector-color-input').value = color;
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function handleSectorSubmit(e) {
+            e.preventDefault();
+            const sectorId = document.getElementById('edit-sector-id').value;
+            const name = document.getElementById('sector-name-input').value.trim();
+            const color = document.getElementById('sector-color-input').value;
+
+            if (!name) return;
+
+            if (sectorId) {
+                const sec = appState.sectors.find(s => s.id === sectorId);
+                if (sec) {
+                    sec.name = name;
+                    sec.color = color;
+                }
+            } else {
+                const source = document.getElementById('sector-copy-source').value;
+                const newSectorId = 'sec_' + Date.now();
+                let newServers = [];
+                let newSchedule = {};
+
+                if (source === 'CENTRAL') {
+                    newServers = JSON.parse(JSON.stringify(appState.centralDatabase));
+                } else if (source === 'BY_LOCATION') {
+                    const chosenLocations = Array.from(document.querySelectorAll('.sector-source-loc-cb:checked')).map(cb => cb.value);
+                    if (chosenLocations.length === 0) {
+                        alert("Por favor, selecione ao menos uma lotação para importar.");
+                        return;
+                    }
+                    newServers = appState.centralDatabase.filter(s => 
+                        s.id === INTERVAL_SERVER_ID || (s.location && chosenLocations.includes(s.location.trim()))
+                    );
+                    newServers = JSON.parse(JSON.stringify(newServers));
+                } else if (source.startsWith('SEC_')) {
+                    const sourceSecId = source.replace('SEC_', '');
+                    const targetSec = appState.sectors.find(s => s.id === sourceSecId);
+                    if (targetSec) {
+                        newServers = JSON.parse(JSON.stringify(targetSec.servers));
+                        newSchedule = JSON.parse(JSON.stringify(targetSec.schedule));
+                    }
+                }
+
+                const newSector = {
+                    id: newSectorId,
+                    name: name,
+                    color: color,
+                    servers: newServers,
+                    schedule: newSchedule,
+                    initializedBreaks: false
+                };
+
+                appState.sectors.push(newSector);
+                ensureIntervalServerExists();
+                ensureDefaultTurnBreaksPreFilled();
+                appState.activeTab = newSectorId;
+            }
+
+            saveToLocalStorage();
+            closeSectorModal();
+            renderTabs();
+            switchTab(appState.activeTab);
+        }
+
+        function deleteSector(secId) {
+            const sec = appState.sectors.find(s => s.id === secId);
+            if (!sec) return;
+
+            if (confirm(`Tem certeza que deseja excluir o setor "${sec.name}" e toda a sua grade de horários?`)) {
+                appState.sectors = appState.sectors.filter(s => s.id !== secId);
+                if (appState.activeTab === secId) {
+                    appState.activeTab = appState.sectors[0] ? appState.sectors[0].id : 'CENTRAL';
+                }
+                saveToLocalStorage();
+                renderTabs();
+                switchTab(appState.activeTab);
+            }
+        }
+
+        // --- FILTRO POR MÚLTIPLAS LOTAÇÕES NA BASE CENTRAL ---
+        function toggleLocationDropdown() {
+            const dropdown = document.getElementById('dropdown-multi-location');
+            dropdown.classList.toggle('hidden');
+        }
+
+        function populateCentralLocationFilter() {
+            const container = document.getElementById('location-checkboxes-container');
+            if (!container) return;
+            container.innerHTML = '';
+
+            const locations = getAllUniqueLocations();
+
+            locations.forEach(loc => {
+                const isChecked = activeLocationFilters.size === 0 || activeLocationFilters.has(loc);
+                const color = findColorByLocation(loc) || '#e0e7ff';
+                const label = document.createElement('label');
+                label.className = "flex items-center gap-2 p-1 rounded hover:bg-slate-50 cursor-pointer select-none";
+                label.innerHTML = `
+                    <input type="checkbox" value="${loc}" ${isChecked ? 'checked' : ''} onchange="handleLocationFilterChange(this)" class="loc-filter-cb rounded text-blue-600">
+                    <span class="w-2.5 h-2.5 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${color}"></span>
+                    <span class="truncate font-medium text-slate-700">${loc}</span>
+                `;
+                container.appendChild(label);
+            });
+
+            updateMultiLocationButtonLabel();
+        }
+
+        function handleLocationFilterChange() {
+            const checkboxes = document.querySelectorAll('.loc-filter-cb');
+            activeLocationFilters.clear();
+            let allChecked = true;
+
+            checkboxes.forEach(cb => {
+                if (cb.checked) {
+                    activeLocationFilters.add(cb.value);
+                } else {
+                    allChecked = false;
+                }
+            });
+
+            // Se todas ou nenhuma estiverem marcadas, interpreta como sem filtro restritivo
+            if (allChecked || activeLocationFilters.size === 0) {
+                activeLocationFilters.clear();
+            }
+
+            updateMultiLocationButtonLabel();
+            renderCentralDatabaseTable();
+        }
+
+        function selectAllLocations(select) {
+            const checkboxes = document.querySelectorAll('.loc-filter-cb');
+            checkboxes.forEach(cb => cb.checked = select);
+            if (select || !select) {
+                activeLocationFilters.clear();
+                if (!select) {
+                    // Limpar todas significa não selecionar nada
+                    checkboxes.forEach(cb => activeLocationFilters.add('___NONE___'));
+                }
+            }
+            updateMultiLocationButtonLabel();
+            renderCentralDatabaseTable();
+        }
+
+        function updateMultiLocationButtonLabel() {
+            const label = document.getElementById('label-multi-location');
+            if (activeLocationFilters.size === 0) {
+                label.innerText = 'Lotações: Todas';
+            } else if (activeLocationFilters.has('___NONE___')) {
+                label.innerText = 'Lotações: Nenhuma';
+            } else if (activeLocationFilters.size === 1) {
+                label.innerText = `Lotação: ${Array.from(activeLocationFilters)[0]}`;
+            } else {
+                label.innerText = `Lotações: (${activeLocationFilters.size})`;
+            }
+        }
+
+        // --- ORDENAÇÃO NA BASE CENTRAL ---
+        function toggleCentralSortDirection() {
+            centralSortAscending = !centralSortAscending;
+            const icon = document.getElementById('central-sort-dir-icon');
+            icon.className = centralSortAscending ? "fa-solid fa-arrow-down-a-z" : "fa-solid fa-arrow-up-z-a";
+            renderCentralDatabaseTable();
+        }
+
+        function getSortedCentralServers(serverList) {
+            const sortType = document.getElementById('central-sort-type')?.value || 'REGISTER';
+            const listCopy = [...serverList];
+
+            listCopy.sort((a, b) => {
+                if (a.id === INTERVAL_SERVER_ID) return -1;
+                if (b.id === INTERVAL_SERVER_ID) return 1;
+
+                let res = 0;
+                if (sortType === 'NAME') {
+                    res = (a.nickname || '').localeCompare(b.nickname || '', 'pt-BR', { sensitivity: 'base' });
+                } else if (sortType === 'LOCATION') {
+                    res = (a.location || '').localeCompare(b.location || '', 'pt-BR', { sensitivity: 'base' });
+                } else if (sortType === 'HOURS') {
+                    res = (a.hours || 0) - (b.hours || 0);
+                } else {
+                    res = (a.createdAt || 0) - (b.createdAt || 0);
+                }
+                return centralSortAscending ? res : -res;
+            });
+
+            return listCopy;
+        }
+
+        // --- EXCLUSÃO EM LOTE: BASE CENTRAL ---
+        function toggleSelectAllCentral(checked) {
+            const checkboxes = document.querySelectorAll('.central-server-cb');
+            checkboxes.forEach(cb => {
+                cb.checked = checked;
+                if (checked) {
+                    selectedCentralServerIds.add(cb.value);
+                } else {
+                    selectedCentralServerIds.delete(cb.value);
+                }
+            });
+            updateCentralBatchBar();
+        }
+
+        function handleCentralCheckboxChange(cb) {
+            if (cb.checked) {
+                selectedCentralServerIds.add(cb.value);
+            } else {
+                selectedCentralServerIds.delete(cb.value);
+            }
+            updateCentralBatchBar();
+        }
+
+        function updateCentralBatchBar() {
+            const bar = document.getElementById('central-batch-bar');
+            const countSpan = document.getElementById('central-batch-count');
+            const selectAllCb = document.getElementById('central-select-all');
+
+            const count = selectedCentralServerIds.size;
+            if (count > 0) {
+                bar.classList.remove('hidden');
+                countSpan.innerText = `${count} selecionado(s)`;
+            } else {
+                bar.classList.add('hidden');
+                if (selectAllCb) selectAllCb.checked = false;
+            }
+        }
+
+        function clearCentralSelection() {
+            selectedCentralServerIds.clear();
+            const selectAllCb = document.getElementById('central-select-all');
+            if (selectAllCb) selectAllCb.checked = false;
+            updateCentralBatchBar();
+            renderCentralDatabaseTable();
+        }
+
+        function deleteBatchCentralServers() {
+            const count = selectedCentralServerIds.size;
+            if (count === 0) return;
+
+            if (confirm(`Tem certeza que deseja apagar ${count} servidores selecionados da Base Central?`)) {
+                appState.centralDatabase = appState.centralDatabase.filter(s => !selectedCentralServerIds.has(s.id) || s.id === INTERVAL_SERVER_ID);
+                selectedCentralServerIds.clear();
+                saveToLocalStorage();
+                updateCentralBatchBar();
+                populateCentralLocationFilter();
+                renderCentralDatabaseTable();
+            }
+        }
+
+        // --- RENDERIZAÇÃO DA BASE CENTRAL ---
+        function renderCentralDatabaseTable() {
+            const tbody = document.getElementById('central-database-tbody');
+            const searchVal = (document.getElementById('search-central-server')?.value || '').toLowerCase().trim();
+            tbody.innerHTML = '';
+
+            let filtered = appState.centralDatabase.filter(s => {
+                const matchesSearch = !searchVal ||
+                                      (s.nickname && s.nickname.toLowerCase().includes(searchVal)) ||
+                                      (s.fullname && s.fullname.toLowerCase().includes(searchVal)) ||
+                                      (s.location && s.location.toLowerCase().includes(searchVal)) ||
+                                      (s.reg && s.reg.toLowerCase().includes(searchVal)) ||
+                                      (s.role && s.role.toLowerCase().includes(searchVal)) ||
+                                      (s.degree && s.degree.toLowerCase().includes(searchVal));
+
+                let matchesLocation = true;
+                if (s.id !== INTERVAL_SERVER_ID && activeLocationFilters.size > 0) {
+                    if (activeLocationFilters.has('___NONE___')) {
+                        matchesLocation = false;
+                    } else {
+                        matchesLocation = activeLocationFilters.has(s.location?.trim());
+                    }
+                }
+
+                return matchesSearch && matchesLocation;
+            });
+
+            filtered = getSortedCentralServers(filtered);
+
+            const centralCountBadge = document.getElementById('central-count-badge');
+            if (centralCountBadge) {
+                centralCountBadge.innerText = `${filtered.length} servidores encontrados`;
+            }
+
+            filtered.forEach(server => {
+                const tr = document.createElement('tr');
+                tr.className = "hover:bg-slate-50 transition";
+                const isSelected = selectedCentralServerIds.has(server.id);
+                const locColor = server.locationColor || '#e0e7ff';
+                const locTextColor = getContrastTextColor(locColor);
+                
+                tr.innerHTML = `
+                    <td class="py-2 px-3 text-center">
+                        ${server.id !== INTERVAL_SERVER_ID ? `
+                            <input type="checkbox" value="${server.id}" ${isSelected ? 'checked' : ''} onchange="handleCentralCheckboxChange(this)" class="central-server-cb rounded text-blue-600 cursor-pointer">
+                        ` : ''}
+                    </td>
+                    <td class="py-2 px-3">
+                        <span class="w-4 h-4 rounded-full inline-block border border-slate-300" style="background-color: ${server.color}"></span>
+                    </td>
+                    <td class="py-2 px-3 font-bold text-slate-800">${server.nickname}</td>
+                    <td class="py-2 px-3 text-slate-600">${server.fullname}</td>
+                    <td class="py-2 px-3">
+                        <span class="font-semibold px-2 py-0.5 rounded border text-[10px] shadow-2xs inline-block" style="background-color: ${locColor}; color: ${locTextColor}; border-color: ${getAdjustedColor(locColor, -25)}">
+                            ${server.location || 'DIAC'}
+                        </span>
+                    </td>
+                    <td class="py-2 px-3 font-mono text-slate-500">${server.reg || '-'}</td>
+                    <td class="py-2 px-3 font-medium text-slate-700">${server.role}</td>
+                    <td class="py-2 px-3 text-slate-500">${server.degree || '-'}</td>
+                    <td class="py-2 px-3 text-center font-bold text-slate-800">${server.hours}h</td>
+                    <td class="py-2 px-3 text-center">
+                        <div class="flex items-center justify-center gap-1">
+                            <button onclick="openServerModal('${server.id}', true)" class="text-blue-600 hover:text-blue-800 p-1" title="Editar">
+                                <i class="fa-solid fa-pen"></i>
+                            </button>
+                            ${server.id !== INTERVAL_SERVER_ID ? `
+                                <button onclick="deleteCentralServer('${server.id}')" class="text-red-500 hover:text-red-700 p-1" title="Excluir da Base Central">
+                                    <i class="fa-solid fa-trash"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            });
+        }
+
+        function deleteCentralServer(id) {
+            if (confirm("Deseja remover este servidor da Base Central? (Os setores que já o possuem cadastrado não serão afetados).")) {
+                appState.centralDatabase = appState.centralDatabase.filter(s => s.id !== id);
+                selectedCentralServerIds.delete(id);
+                saveToLocalStorage();
+                updateCentralBatchBar();
+                populateCentralLocationFilter();
+                renderCentralDatabaseTable();
+            }
+        }
+
+        // --- CÁLCULO DINÂMICO DE CONTRASTE DE TEXTO ---
+        function getContrastTextColor(hexColor) {
+            if (!hexColor || hexColor.length < 6) return '#1e293b';
+            let hex = hexColor.replace('#', '');
+            if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+            
+            const r = parseInt(hex.substring(0, 2), 16) || 0;
+            const g = parseInt(hex.substring(2, 4), 16) || 0;
+            const b = parseInt(hex.substring(4, 6), 16) || 0;
+
+            const luminance = (r * 299 + g * 587 + b * 114) / 1000;
+            return luminance < 140 ? '#ffffff' : '#1e293b';
+        }
+
+        // --- MODO PINCEL ---
+        function setActiveBrushServer(serverId) {
+            if (activeBrushServerId === serverId) {
+                clearActiveBrush();
+                return;
+            }
+            activeBrushServerId = serverId;
+            const sec = getCurrentSector();
+            const server = sec ? sec.servers.find(s => s.id === serverId) : null;
+            
+            if (server) {
+                document.getElementById('active-brush-bar').classList.remove('hidden');
+                document.getElementById('active-brush-name').innerText = server.nickname;
+            }
+            renderServers();
+        }
+
+        function clearActiveBrush() {
+            activeBrushServerId = null;
+            document.getElementById('active-brush-bar').classList.add('hidden');
+            renderServers();
+        }
+
+        function setGridInterval(minutes) {
+            appState.gridIntervalMinutes = parseInt(minutes, 10);
+            saveToLocalStorage();
+            updateGridIntervalButtons();
+            renderScheduleTable();
+        }
+
+        function updateGridIntervalButtons() {
+            const btn30 = document.getElementById('btn-view-30');
+            const btn45 = document.getElementById('btn-view-45');
+            const btn60 = document.getElementById('btn-view-60');
+
+            const inactiveClass = "px-2.5 py-1 rounded text-xs font-semibold transition text-slate-600 hover:text-slate-900 hover:bg-slate-200";
+            const activeClass = "px-2.5 py-1 rounded text-xs font-semibold transition bg-blue-600 text-white shadow-xs";
+
+            btn30.className = inactiveClass;
+            btn45.className = inactiveClass;
+            btn60.className = inactiveClass;
+
+            if (appState.gridIntervalMinutes === 45) {
+                btn45.className = activeClass;
+            } else if (appState.gridIntervalMinutes === 60) {
+                btn60.className = activeClass;
+            } else {
+                btn30.className = activeClass;
+            }
+        }
+
+        function getScheduleRowDefinitions() {
+            const rows = [];
+            const interval = appState.gridIntervalMinutes;
+
+            if (interval === 60) {
+                for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                    const startStr = `${String(hour).padStart(2, '0')}:00`;
+                    const endStr = `${String(hour + 1).padStart(2, '0')}:00`;
+                    const sub00 = startStr;
+                    const sub30 = `${String(hour).padStart(2, '0')}:30`;
+                    rows.push({
+                        label: `${startStr} - ${endStr}`,
+                        primaryKey: sub00,
+                        mappedKeys: [sub00, sub30],
+                        durationHours: 1.0
+                    });
+                }
+            } else if (interval === 45) {
+                const periods = [
+                    { start: "07:00", end: "07:45", keys: ["07:00"] },
+                    { start: "07:45", end: "08:30", keys: ["07:30", "07:45"] },
+                    { start: "08:30", end: "09:15", keys: ["08:30"] },
+                    { start: "09:15", end: "10:00", keys: ["09:00", "09:30"] },
+                    { start: "10:00", end: "10:45", keys: ["10:00"] },
+                    { start: "10:45", end: "11:30", keys: ["10:30", "11:00"] },
+                    { start: "11:30", end: "12:00", keys: ["11:30"] },
+                    { start: "12:00", end: "13:00", keys: ["12:00", "12:30"], isBreakSlot: true, labelSuffix: "(Intervalo Almoço)" },
+                    { start: "13:00", end: "13:45", keys: ["13:00"] },
+                    { start: "13:45", end: "14:30", keys: ["13:30", "14:00"] },
+                    { start: "14:30", end: "15:15", keys: ["14:30"] },
+                    { start: "15:15", end: "16:00", keys: ["15:00", "15:30"] },
+                    { start: "16:00", end: "16:45", keys: ["16:00"] },
+                    { start: "16:45", end: "17:30", keys: ["16:30", "17:00"] },
+                    { start: "17:30", end: "18:00", keys: ["17:30"] },
+                    { start: "18:00", end: "18:45", keys: ["18:00"], isBreakSlot: true, labelSuffix: "(Intervalo Noite)" },
+                    { start: "18:45", end: "19:30", keys: ["18:30", "19:00"] },
+                    { start: "19:30", end: "20:15", keys: ["19:30"] },
+                    { start: "20:15", end: "21:00", keys: ["20:00", "20:30"] },
+                    { start: "21:00", end: "21:45", keys: ["21:00"] },
+                    { start: "21:45", end: "22:15", keys: ["21:30", "22:00"] }
+                ];
+
+                periods.forEach(p => {
+                    const labelText = p.labelSuffix ? `${p.start} - ${p.end} ${p.labelSuffix}` : `${p.start} - ${p.end}`;
+                    rows.push({
+                        label: labelText,
+                        primaryKey: p.keys[0],
+                        mappedKeys: p.keys,
+                        durationHours: 0.75,
+                        isBreakSlot: !!p.isBreakSlot
+                    });
+                });
+            } else {
+                for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                    for (let min of [0, 30]) {
+                        const timeString = `${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+                        const isLunchBreak = (timeString === '12:00' || timeString === '12:30');
+                        const isNightBreak = (timeString === '18:00');
+                        let labelSuffix = '';
+                        if (isLunchBreak) labelSuffix = ' (Almoço)';
+                        if (isNightBreak) labelSuffix = ' (Intervalo)';
+
+                        rows.push({
+                            label: timeString + labelSuffix,
+                            primaryKey: timeString,
+                            mappedKeys: [timeString],
+                            durationHours: 0.5,
+                            isBreakSlot: isLunchBreak || isNightBreak
+                        });
+                    }
+                }
+            }
+
+            return rows;
+        }
+
+        function renderScheduleTable() {
+            const tbody = document.getElementById('schedule-body');
+            tbody.innerHTML = '';
+
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const schedule = currentSector.schedule;
+            const servers = currentSector.servers;
+            const rowDefinitions = getScheduleRowDefinitions();
+
+            rowDefinitions.forEach(rowDef => {
+                const tr = document.createElement('tr');
+                tr.className = rowDef.isBreakSlot ? "bg-amber-50/40 hover:bg-amber-50 transition-colors" : "hover:bg-slate-50/50 transition-colors";
+
+                const tdTime = document.createElement('td');
+                tdTime.className = `py-1.5 px-2 font-semibold text-center border-r border-b border-slate-200 select-none text-[11px] ${rowDef.isBreakSlot ? 'bg-amber-100/50 text-amber-900 font-bold' : 'bg-slate-50/80 text-slate-600'}`;
+                tdTime.innerText = rowDef.label;
+                tr.appendChild(tdTime);
+
+                DAYS.forEach(day => {
+                    const primaryCellId = `${day}_${rowDef.primaryKey}`;
+                    const td = document.createElement('td');
+                    td.className = `schedule-cell border-r border-b border-slate-200 p-1 relative min-h-[38px] vertical-top selectable-cell cursor-pointer transition-all ${rowDef.isBreakSlot ? 'bg-amber-50/20' : ''}`;
+                    td.dataset.cellId = primaryCellId;
+
+                    const cellContainer = document.createElement('div');
+                    cellContainer.className = "flex flex-col gap-1 w-full h-full min-h-[32px]";
+
+                    td.onclick = (e) => handleMultiKeyCellClick(e, day, rowDef.mappedKeys);
+                    td.addEventListener('mousedown', (e) => handleCellMouseDown(e, primaryCellId));
+                    td.addEventListener('mouseenter', () => handleCellMouseEnter(primaryCellId));
+                    td.addEventListener('dragover', handleDragOver);
+                    td.addEventListener('dragleave', handleDragLeave);
+                    td.addEventListener('drop', (e) => handleMultiKeyDrop(e, day, rowDef.mappedKeys));
+
+                    rowDef.mappedKeys.forEach(tKey => {
+                        const subCellId = `${day}_${tKey}`;
+                        const allocs = schedule[subCellId] || [];
+                        allocs.forEach((alloc, index) => {
+                            const server = servers.find(s => s.id === alloc.serverId);
+                            if (server) {
+                                cellContainer.appendChild(createScheduleBlock(server, subCellId, index, alloc.isRemote));
+                            }
+                        });
+                    });
+
+                    td.appendChild(cellContainer);
+                    tr.appendChild(td);
+                });
+
+                tbody.appendChild(tr);
+            });
+        }
+
+        function createScheduleBlock(server, cellId, allocIndex, isRemote = false) {
+            const block = document.createElement('div');
+            block.className = `time-slot-block w-full rounded px-1.5 py-1 flex items-center justify-between shadow-xs border transition-all text-[11px] font-medium overflow-hidden group ${isRemote ? 'slot-remoto' : ''}`;
+            
+            const textColor = getContrastTextColor(server.color);
+            const strongerBorderColor = getAdjustedColor(server.color, -55);
+
+            if (isRemote) {
+                block.style.backgroundColor = '#ffffff';
+                block.style.borderColor = strongerBorderColor;
+                block.style.color = strongerBorderColor;
+            } else {
+                block.style.backgroundColor = server.color || '#e0f2fe';
+                block.style.borderColor = getAdjustedColor(server.color, -25);
+                block.style.color = textColor;
+            }
+
+            block.dataset.serverId = server.id;
+
+            const infoDiv = document.createElement('div');
+            infoDiv.className = "flex items-center gap-1 min-w-0 truncate pointer-events-none";
+
+            const nameSpan = document.createElement('span');
+            nameSpan.className = "truncate font-semibold";
+            nameSpan.innerText = server.nickname;
+            nameSpan.title = `${server.fullname} [${server.location || 'DIAC'}] (${server.role}) ${isRemote ? '[REMOTO]' : '[PRESENCIAL]'}`;
+
+            infoDiv.appendChild(nameSpan);
+
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = "flex items-center gap-1 flex-shrink-0 no-print";
+
+            if (server.id !== INTERVAL_SERVER_ID) {
+                const remoteBtn = document.createElement('button');
+                remoteBtn.type = "button";
+                remoteBtn.className = `px-1 py-0.2 text-[9px] font-bold rounded border transition ${
+                    isRemote 
+                        ? 'bg-slate-800 text-white border-slate-900 shadow-2xs' 
+                        : 'bg-white/80 hover:bg-white text-slate-700 border-slate-300'
+                }`;
+                remoteBtn.innerText = isRemote ? "REM" : "PRES";
+                remoteBtn.title = "Alternar entre Presencial e Remoto";
+                remoteBtn.onclick = (e) => {
+                    e.stopPropagation();
+                    toggleRemoteStatus(cellId, allocIndex);
+                };
+                actionsDiv.appendChild(remoteBtn);
+            }
+
+            const removeBtn = document.createElement('button');
+            removeBtn.type = "button";
+            removeBtn.className = "opacity-80 group-hover:opacity-100 text-slate-400 hover:text-red-600 px-0.5 rounded transition";
+            removeBtn.style.color = isRemote ? '#64748b' : (textColor === '#ffffff' ? '#e2e8f0' : '#64748b');
+            removeBtn.innerHTML = '<i class="fa-solid fa-xmark text-xs"></i>';
+            removeBtn.title = "Remover este bloco";
+            removeBtn.onclick = (e) => {
+                e.stopPropagation();
+                removeScheduleSlot(cellId, allocIndex);
+            };
+
+            actionsDiv.appendChild(removeBtn);
+
+            block.appendChild(infoDiv);
+            block.appendChild(actionsDiv);
+
+            return block;
+        }
+
+        function toggleRemoteStatus(cellId, allocIndex) {
+            const currentSector = getCurrentSector();
+            if (currentSector && currentSector.schedule[cellId] && currentSector.schedule[cellId][allocIndex]) {
+                currentSector.schedule[cellId][allocIndex].isRemote = !currentSector.schedule[cellId][allocIndex].isRemote;
+                saveToLocalStorage();
+                renderScheduleTable();
+            }
+        }
+
+        function toggleSortDirection() {
+            sortAscending = !sortAscending;
+            const icon = document.getElementById('sort-dir-icon');
+            icon.className = sortAscending ? "fa-solid fa-arrow-down-a-z" : "fa-solid fa-arrow-up-z-a";
+            renderServers();
+        }
+
+        function getSortedServers(serverList) {
+            const sortType = document.getElementById('sort-type')?.value || 'REGISTER';
+            const listCopy = [...serverList];
+
+            listCopy.sort((a, b) => {
+                let res = 0;
+                if (sortType === 'NAME') {
+                    res = (a.nickname || '').localeCompare(b.nickname || '', 'pt-BR', { sensitivity: 'base' });
+                } else if (sortType === 'LOCATION') {
+                    res = (a.location || '').localeCompare(b.location || '', 'pt-BR', { sensitivity: 'base' });
+                } else if (sortType === 'HOURS') {
+                    res = a.hours - b.hours;
+                } else if (sortType === 'GRID_USAGE') {
+                    res = calculateServerOccurrences(a.id) - calculateServerOccurrences(b.id);
+                } else {
+                    res = (a.createdAt || 0) - (b.createdAt || 0);
+                }
+                return sortAscending ? res : -res;
+            });
+
+            return listCopy;
+        }
+
+        function calculateServerOccurrences(serverId) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return 0;
+            let count = 0;
+            for (let key in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[key])) {
+                    currentSector.schedule[key].forEach(alloc => {
+                        if (alloc.serverId === serverId) count++;
+                    });
+                }
+            }
+            return count;
+        }
+
+        // --- EXCLUSÃO EM LOTE: QUADRO DO SETOR ---
+        function toggleSelectAllSector(checked) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (checked) {
+                currentSector.servers.forEach(s => {
+                    if (s.id !== INTERVAL_SERVER_ID) selectedSectorServerIds.add(s.id);
+                });
+            } else {
+                selectedSectorServerIds.clear();
+            }
+            updateSectorBatchControls();
+            renderServers();
+        }
+
+        function handleSectorCheckboxChange(serverId, checked) {
+            if (checked) {
+                selectedSectorServerIds.add(serverId);
+            } else {
+                selectedSectorServerIds.delete(serverId);
+            }
+            updateSectorBatchControls();
+        }
+
+        function updateSectorBatchControls() {
+            const btn = document.getElementById('sector-batch-delete-btn');
+            const countSpan = document.getElementById('sector-batch-count');
+            const count = selectedSectorServerIds.size;
+
+            if (count > 0) {
+                btn.classList.remove('hidden');
+                countSpan.innerText = count;
+            } else {
+                btn.classList.add('hidden');
+                const allCb = document.getElementById('sector-select-all');
+                if (allCb) allCb.checked = false;
+            }
+        }
+
+        function clearSectorSelection() {
+            selectedSectorServerIds.clear();
+            const allCb = document.getElementById('sector-select-all');
+            if (allCb) allCb.checked = false;
+            updateSectorBatchControls();
+        }
+
+        function deleteBatchSectorServers() {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+            const count = selectedSectorServerIds.size;
+            if (count === 0) return;
+
+            if (confirm(`Deseja remover os ${count} servidores selecionados do setor "${currentSector.name}"? As grades deles também serão limpas.`)) {
+                selectedSectorServerIds.forEach(id => {
+                    clearServerSchedule(id, false);
+                });
+                currentSector.servers = currentSector.servers.filter(s => !selectedSectorServerIds.has(s.id) || s.id === INTERVAL_SERVER_ID);
+                selectedSectorServerIds.clear();
+                saveToLocalStorage();
+                updateSectorBatchControls();
+                renderServers();
+                renderScheduleTable();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function renderServers() {
+            const listContainer = document.getElementById('servers-list');
+            const searchVal = document.getElementById('search-server').value.toLowerCase();
+            const filterSelect = document.getElementById('filter-server-highlight');
+            
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            listContainer.innerHTML = '';
+            
+            const currentFilter = filterSelect.value;
+            filterSelect.innerHTML = '<option value="ALL">Todos os Servidores</option>';
+
+            let filtered = currentSector.servers.filter(s => 
+                s.nickname.toLowerCase().includes(searchVal) || 
+                s.fullname.toLowerCase().includes(searchVal) ||
+                (s.location && s.location.toLowerCase().includes(searchVal)) ||
+                s.role.toLowerCase().includes(searchVal)
+            );
+
+            filtered = getSortedServers(filtered);
+
+            document.getElementById('server-count').innerText = currentSector.servers.length;
+
+            currentSector.servers.forEach(s => {
+                const opt = document.createElement('option');
+                opt.value = s.id;
+                opt.innerText = `${s.nickname} (${s.role})`;
+                if (s.id === currentFilter) opt.selected = true;
+                filterSelect.appendChild(opt);
+            });
+
+            if (filtered.length === 0) {
+                listContainer.innerHTML = `
+                    <div class="text-center py-8 text-slate-400 text-xs">
+                        <i class="fa-solid fa-user-slash text-2xl mb-2"></i>
+                        <p>Nenhum servidor no quadro deste setor.</p>
+                    </div>`;
+                return;
+            }
+
+            filtered.forEach(server => {
+                const allocatedHours = calculateServerHours(server.id);
+                const occurrences = calculateServerOccurrences(server.id);
+                const progressPercent = Math.min(100, (allocatedHours / server.hours) * 100);
+                const isOverloaded = allocatedHours > server.hours && server.id !== INTERVAL_SERVER_ID;
+                const isActiveBrush = activeBrushServerId === server.id;
+                const isChecked = selectedSectorServerIds.has(server.id);
+                const locColor = server.locationColor || '#e0e7ff';
+                const locTextColor = getContrastTextColor(locColor);
+                
+                let statusColor = "bg-emerald-500";
+                let statusText = "text-emerald-700 font-semibold";
+                
+                if (isOverloaded) {
+                    statusColor = "bg-red-600";
+                    statusText = "text-red-600 font-bold flex items-center gap-1";
+                } else if (allocatedHours < server.hours) {
+                    statusColor = "bg-amber-500";
+                    statusText = "text-amber-700 font-medium";
+                }
+
+                const card = document.createElement('div');
+                card.className = `bg-white p-2.5 rounded-xl border ${isActiveBrush ? 'active-brush-card' : (isOverloaded ? 'border-red-300 ring-1 ring-red-200' : 'border-slate-200')} shadow-xs hover:shadow-md transition cursor-pointer select-none group relative`;
+                card.draggable = true;
+
+                card.onclick = (e) => {
+                    if (e.target.closest('button') || e.target.closest('input')) return;
+                    setActiveBrushServer(server.id);
+                };
+
+                card.addEventListener('dragstart', (e) => handleDragStart(e, server.id));
+                card.addEventListener('dragend', handleDragEnd);
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-start mb-1">
+                        <div class="flex items-center gap-2">
+                            ${server.id !== INTERVAL_SERVER_ID ? `
+                                <input type="checkbox" ${isChecked ? 'checked' : ''} onchange="handleSectorCheckboxChange('${server.id}', this.checked)" class="rounded text-blue-600 cursor-pointer -mt-0.5">
+                            ` : ''}
+                            <span class="w-3.5 h-3.5 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${server.color}"></span>
+                            <div>
+                                <h3 class="font-bold text-xs text-slate-800 leading-tight flex items-center gap-1">
+                                    ${server.nickname}
+                                    ${isActiveBrush ? '<span class="text-[9px] bg-blue-600 text-white px-1 py-0.2 rounded font-bold">Pincel</span>' : ''}
+                                </h3>
+                                <div class="flex items-center gap-1 mt-0.5">
+                                    <span class="text-[9px] font-semibold px-1 rounded truncate max-w-[85px] border" style="background-color: ${locColor}; color: ${locTextColor}; border-color: ${getAdjustedColor(locColor, -25)}" title="Lotação: ${server.location || 'DIAC'}">
+                                        ${server.location || 'DIAC'}
+                                    </span>
+                                    <span class="text-[10px] text-slate-500 truncate max-w-[95px]">${server.role}</span>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-0.5">
+                            <button onclick="editServer('${server.id}')" class="text-slate-400 hover:text-blue-600 p-1" title="Editar (Sincronizado)">
+                                <i class="fa-solid fa-pen text-xs"></i>
+                            </button>
+                            <button onclick="clearServerSchedule('${server.id}')" class="text-slate-400 hover:text-amber-600 p-1" title="Limpar Horários">
+                                <i class="fa-solid fa-eraser text-xs"></i>
+                            </button>
+                            ${server.id !== INTERVAL_SERVER_ID ? `
+                                <button onclick="deleteServer('${server.id}')" class="text-slate-400 hover:text-red-600 p-1" title="Excluir do Setor">
+                                    <i class="fa-solid fa-trash text-xs"></i>
+                                </button>
+                            ` : ''}
+                        </div>
+                    </div>
+
+                    <div class="mt-1.5 text-xs">
+                        <div class="flex justify-between items-center mb-1">
+                            <span class="text-slate-400 text-[10px]">Grade: ${occurrences} slots</span>
+                            <span class="${statusText} text-[10px]">
+                                ${isOverloaded ? '<i class="fa-solid fa-triangle-exclamation"></i>' : ''} 
+                                ${allocatedHours}h / ${server.hours}h
+                            </span>
+                        </div>
+                        <div class="w-full bg-slate-100 rounded-full h-1.5 overflow-hidden">
+                            <div class="${statusColor} h-1.5 rounded-full transition-all duration-300" style="width: ${progressPercent}%"></div>
+                        </div>
+                    </div>
+                `;
+
+                listContainer.appendChild(card);
+            });
+        }
+
+        function addIntervalQuickly() {
+            setActiveBrushServer(INTERVAL_SERVER_ID);
+        }
+
+        function calculateServerHours(serverId) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return 0;
+
+            let slots = 0;
+            for (let key in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[key])) {
+                    currentSector.schedule[key].forEach(alloc => {
+                        if (alloc.serverId === serverId) slots++;
+                    });
+                }
+            }
+            return slots * 0.5;
+        }
+
+        function checkAndRenderOverloadAlerts() {
+            const alertContainer = document.getElementById('alerts-container');
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const overloadedServers = [];
+
+            currentSector.servers.forEach(server => {
+                if (server.id === INTERVAL_SERVER_ID) return;
+                const allocated = calculateServerHours(server.id);
+                if (allocated > server.hours) {
+                    overloadedServers.push({
+                        server,
+                        allocated,
+                        exceeded: allocated - server.hours
+                    });
+                }
+            });
+
+            if (overloadedServers.length > 0) {
+                alertContainer.classList.remove('hidden');
+                alertContainer.innerHTML = overloadedServers.map(item => `
+                    <div class="bg-red-50 border-l-4 border-red-500 text-red-800 p-3 rounded-r-xl shadow-xs mb-2 flex items-center justify-between banner-overload">
+                        <div class="flex items-center gap-3">
+                            <i class="fa-solid fa-circle-exclamation text-red-600 text-lg"></i>
+                            <div>
+                                <p class="text-xs sm:text-sm font-bold">
+                                    Atenção: Carga Horária Excedida no setor "${currentSector.name}"!
+                                </p>
+                                <p class="text-xs text-red-700">
+                                    O servidor <strong>${item.server.nickname}</strong> (${item.server.fullname} - ${item.server.location || 'DIAC'}) ultrapassou a jornada semanal configurada de <strong>${item.server.hours}h</strong>. Horas alocadas atualmente: <strong>${item.allocated}h</strong> (+${item.exceeded}h de excesso).
+                                </p>
+                            </div>
+                        </div>
+                        <button onclick="highlightServerSchedule('${item.server.id}')" class="bg-red-600 hover:bg-red-700 text-white text-xs px-3 py-1.5 rounded-lg font-medium transition shadow-2xs flex-shrink-0">
+                            Ver no Quadro
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                alertContainer.classList.add('hidden');
+                alertContainer.innerHTML = '';
+            }
+        }
+
+        // --- INTERAÇÕES DA GRADE ---
+        function handleMultiKeyCellClick(e, day, keys) {
+            if (e.target.closest('button')) return;
+            if (activeBrushServerId) {
+                keys.forEach(k => assignServerToCell(activeBrushServerId, `${day}_${k}`));
+            }
+        }
+
+        function handleMultiKeyDrop(e, day, keys) {
+            e.preventDefault();
+            e.currentTarget.classList.remove('drag-over');
+            if (draggedServerId) {
+                keys.forEach(k => assignServerToCell(draggedServerId, `${day}_${k}`));
+            }
+        }
+
+        function handleDragStart(e, serverId) {
+            draggedServerId = serverId;
+            e.dataTransfer.setData('text/plain', serverId);
+            e.currentTarget.classList.add('dragging');
+        }
+
+        function handleDragEnd(e) {
+            e.currentTarget.classList.remove('dragging');
+            draggedServerId = null;
+        }
+
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+
+        function assignServerToCell(serverId, cellId, isRemote = false) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (!currentSector.schedule[cellId]) {
+                currentSector.schedule[cellId] = [];
+            }
+            
+            const alreadyExists = currentSector.schedule[cellId].some(a => a.serverId === serverId);
+            if (!alreadyExists) {
+                currentSector.schedule[cellId].push({ serverId, isRemote });
+            }
+            
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function removeScheduleSlot(cellId, allocIndex) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (currentSector.schedule[cellId]) {
+                currentSector.schedule[cellId].splice(allocIndex, 1);
+                if (currentSector.schedule[cellId].length === 0) {
+                    delete currentSector.schedule[cellId];
+                }
+                saveToLocalStorage();
+                renderScheduleTable();
+                renderServers();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function handleCellMouseDown(e, cellId) {
+            if (e.target.closest('button')) return;
+            isMouseDown = true;
+            selectionStartCell = cellId;
+            selectedCells = [cellId];
+            updateCellSelections();
+        }
+
+        function handleCellMouseEnter(cellId) {
+            if (!isMouseDown || !selectionStartCell) return;
+            const [startDay, startTime] = selectionStartCell.split('_');
+            const [currentDay, currentTime] = cellId.split('_');
+
+            if (startDay === currentDay) {
+                const times = getAllTimeSlots();
+                const startIndex = times.indexOf(startTime);
+                const currentIndex = times.indexOf(currentTime);
+
+                const minIndex = Math.min(startIndex, currentIndex);
+                const maxIndex = Math.max(startIndex, currentIndex);
+
+                selectedCells = [];
+                for (let i = minIndex; i <= maxIndex; i++) {
+                    selectedCells.push(`${startDay}_${times[i]}`);
+                }
+                updateCellSelections();
+            }
+        }
+
+        function setupGlobalMouseAndKeyEvents() {
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape') {
+                    clearActiveBrush();
+                }
+            });
+
+            document.addEventListener('mouseup', () => {
+                if (isMouseDown && selectedCells.length > 0 && draggedServerId) {
+                    selectedCells.forEach(cellId => {
+                        assignServerToCell(draggedServerId, cellId);
+                    });
+                }
+                isMouseDown = false;
+                selectionStartCell = null;
+                selectedCells = [];
+                clearCellSelections();
+            });
+        }
+
+        function updateCellSelections() {
+            clearCellSelections();
+            selectedCells.forEach(id => {
+                const td = document.querySelector(`[data-cell-id="${id}"]`);
+                if (td) td.classList.add('selected-cell');
+            });
+        }
+
+        function clearCellSelections() {
+            document.querySelectorAll('.selected-cell').forEach(el => el.classList.remove('selected-cell'));
+        }
+
+        function getAllTimeSlots() {
+            const slots = [];
+            for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+                for (let min of [0, 30]) {
+                    slots.push(`${String(hour).padStart(2, '0')}:${String(min).padStart(2, '0')}`);
+                }
+            }
+            return slots;
+        }
+
+        // --- FORMULÁRIO DO SERVIDOR & IMPORTAÇÃO NO QUADRO DO SETOR ---
+        function setServerModalMode(mode) {
+            const btnManual = document.getElementById('btn-tab-mode-manual');
+            const btnImport = document.getElementById('btn-tab-mode-import');
+            const formManual = document.getElementById('form-server');
+            const panelImport = document.getElementById('server-import-from-central-panel');
+
+            if (mode === 'IMPORT') {
+                btnImport.className = "flex-1 py-1.5 rounded-md bg-white text-blue-600 shadow-2xs";
+                btnManual.className = "flex-1 py-1.5 rounded-md text-slate-600 hover:text-slate-900";
+                formManual.classList.add('hidden');
+                panelImport.classList.remove('hidden');
+                renderImportableServersList();
+            } else {
+                btnManual.className = "flex-1 py-1.5 rounded-md bg-white text-blue-600 shadow-2xs";
+                btnImport.className = "flex-1 py-1.5 rounded-md text-slate-600 hover:text-slate-900";
+                panelImport.classList.add('hidden');
+                formManual.classList.remove('hidden');
+            }
+        }
+
+        function renderImportableServersList() {
+            const container = document.getElementById('importable-servers-container');
+            const searchVal = (document.getElementById('search-import-server-input')?.value || '').toLowerCase().trim();
+            container.innerHTML = '';
+
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const existingIds = new Set(currentSector.servers.map(s => s.id));
+            const availableServers = appState.centralDatabase.filter(s => 
+                s.id !== INTERVAL_SERVER_ID && 
+                !existingIds.has(s.id) &&
+                (!searchVal || s.nickname.toLowerCase().includes(searchVal) || s.fullname.toLowerCase().includes(searchVal) || s.role.toLowerCase().includes(searchVal) || (s.location && s.location.toLowerCase().includes(searchVal)))
+            );
+
+            if (availableServers.length === 0) {
+                container.innerHTML = `<div class="p-4 text-center text-slate-400 text-xs">Nenhum outro servidor disponível na Base Central para importar.</div>`;
+                return;
+            }
+
+            availableServers.forEach(server => {
+                const locColor = server.locationColor || '#e0e7ff';
+                const locTextColor = getContrastTextColor(locColor);
+                const item = document.createElement('div');
+                item.className = "flex items-center justify-between p-2 rounded-xl bg-slate-50 border border-slate-200 hover:border-blue-400 hover:bg-blue-50/50 transition cursor-pointer group";
+                item.onclick = () => importServerFromCentralToSector(server.id);
+
+                item.innerHTML = `
+                    <div class="flex items-center gap-2 min-w-0 truncate">
+                        <span class="w-3.5 h-3.5 rounded-full border border-slate-300 flex-shrink-0" style="background-color: ${server.color}"></span>
+                        <div class="truncate">
+                            <h4 class="font-bold text-xs text-slate-800 truncate">${server.nickname} <span class="font-normal text-slate-500 text-[10px]">(${server.fullname})</span></h4>
+                            <div class="flex items-center gap-1 mt-0.5">
+                                <span class="text-[9px] font-semibold px-1 rounded truncate border" style="background-color: ${locColor}; color: ${locTextColor}; border-color: ${getAdjustedColor(locColor, -25)}">${server.location || 'DIAC'}</span>
+                                <span class="text-[10px] text-slate-500 truncate">${server.role} • ${server.hours}h</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="bg-blue-600 hover:bg-blue-700 text-white text-[11px] font-semibold px-2.5 py-1 rounded-lg transition shadow-2xs flex-shrink-0 ml-2">
+                        + Importar
+                    </button>
+                `;
+                container.appendChild(item);
+            });
+        }
+
+        function importServerFromCentralToSector(serverId) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            const targetServer = appState.centralDatabase.find(s => s.id === serverId);
+            if (!targetServer) return;
+
+            if (currentSector.servers.some(s => s.id === serverId)) {
+                alert("Este servidor já está presente no quadro deste setor.");
+                return;
+            }
+
+            currentSector.servers.push(JSON.parse(JSON.stringify(targetServer)));
+            saveToLocalStorage();
+            closeServerModal();
+            renderServers();
+            renderScheduleTable();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function openServerModal(serverId = null, isCentral = false) {
+            const modal = document.getElementById('modal-server');
+            const form = document.getElementById('form-server');
+            const title = document.getElementById('modal-title');
+            const modeTabs = document.getElementById('server-modal-mode-tabs');
+
+            form.reset();
+            document.getElementById('server-is-central').value = isCentral ? 'true' : 'false';
+
+            const server = findServerAnywhere(serverId);
+
+            if (server) {
+                // Modo Edição
+                title.innerText = "Editar Servidor (Sincronizado)";
+                modeTabs.classList.add('hidden');
+                setServerModalMode('MANUAL');
+
+                document.getElementById('server-id').value = server.id;
+                document.getElementById('server-nickname').value = server.nickname;
+                document.getElementById('server-fullname').value = server.fullname;
+                document.getElementById('server-location').value = server.location || 'DIAC';
+                document.getElementById('server-location-color').value = server.locationColor || '#e0e7ff';
+                document.getElementById('server-reg').value = server.reg || '';
+                document.getElementById('server-role').value = server.role;
+                document.getElementById('server-degree').value = server.degree || '';
+                document.getElementById('server-hours').value = server.hours;
+                document.getElementById('server-color').value = server.color;
+            } else {
+                // Modo Novo
+                title.innerText = isCentral ? "Novo Servidor (Base Central)" : "Adicionar Servidor ao Setor";
+                document.getElementById('server-id').value = '';
+                
+                if (!isCentral) {
+                    modeTabs.classList.remove('hidden');
+                    setServerModalMode('MANUAL');
+                } else {
+                    modeTabs.classList.add('hidden');
+                    setServerModalMode('MANUAL');
+                }
+
+                const defaultLocation = getCurrentSector()?.name || 'DIAC';
+                document.getElementById('server-location').value = defaultLocation;
+                
+                const existingColor = findColorByLocation(defaultLocation);
+                document.getElementById('server-location-color').value = existingColor || '#e0e7ff';
+                suggestNewColor();
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function findColorByLocation(locationName) {
+            if (!locationName) return null;
+            const norm = locationName.trim().toLowerCase();
+            const fromCentral = appState.centralDatabase.find(s => s.location && s.location.trim().toLowerCase() === norm && s.locationColor);
+            if (fromCentral) return fromCentral.locationColor;
+            for (let sec of appState.sectors) {
+                const fromSec = sec.servers.find(s => s.location && s.location.trim().toLowerCase() === norm && s.locationColor);
+                if (fromSec) return fromSec.locationColor;
+            }
+            return null;
+        }
+
+        function handleLocationNameInput(typedLocation) {
+            const foundColor = findColorByLocation(typedLocation);
+            if (foundColor) {
+                document.getElementById('server-location-color').value = foundColor;
+            }
+        }
+
+        function findServerAnywhere(serverId) {
+            if (!serverId) return null;
+            let s = appState.centralDatabase.find(x => x.id === serverId);
+            if (s) return s;
+            for (let sec of appState.sectors) {
+                s = sec.servers.find(x => x.id === serverId);
+                if (s) return s;
+            }
+            return null;
+        }
+
+        function closeServerModal() {
+            document.getElementById('modal-server').classList.add('hidden');
+        }
+
+        function suggestNewColor() {
+            const randomColor = SOFT_PASTEL_COLORS[Math.floor(Math.random() * SOFT_PASTEL_COLORS.length)];
+            document.getElementById('server-color').value = randomColor;
+        }
+
+        function suggestLocationColor() {
+            const randomColor = SOFT_PASTEL_COLORS[Math.floor(Math.random() * SOFT_PASTEL_COLORS.length)];
+            document.getElementById('server-location-color').value = randomColor;
+        }
+
+        function renderColorPaletteSuggestions() {
+            const container = document.getElementById('color-palette-suggestions');
+            if (!container) return;
+            container.innerHTML = '';
+            SOFT_PASTEL_COLORS.forEach(color => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-6 h-6 rounded-full border border-slate-300 transition transform hover:scale-110 shadow-2xs";
+                btn.style.backgroundColor = color;
+                btn.onclick = () => {
+                    document.getElementById('server-color').value = color;
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        function renderLocationColorSuggestions() {
+            const container = document.getElementById('location-color-palette-suggestions');
+            if (!container) return;
+            container.innerHTML = '';
+            SOFT_PASTEL_COLORS.forEach(color => {
+                const btn = document.createElement('button');
+                btn.type = 'button';
+                btn.className = "w-5 h-5 rounded-full border border-slate-300 transition transform hover:scale-110 shadow-2xs";
+                btn.style.backgroundColor = color;
+                btn.onclick = () => {
+                    document.getElementById('server-location-color').value = color;
+                };
+                container.appendChild(btn);
+            });
+        }
+
+        // SALVAMENTO SINCRONIZADO COM PROPAGAÇÃO DA COR DA LOTAÇÃO
+        function saveServer(e) {
+            e.preventDefault();
+
+            const isCentral = document.getElementById('server-is-central').value === 'true';
+            const id = document.getElementById('server-id').value || 's_' + Date.now();
+            const nickname = document.getElementById('server-nickname').value.trim();
+            const fullname = document.getElementById('server-fullname').value.trim();
+            const location = document.getElementById('server-location').value.trim() || 'DIAC';
+            const locationColor = document.getElementById('server-location-color').value;
+            const reg = document.getElementById('server-reg').value.trim();
+            const role = document.getElementById('server-role').value.trim();
+            const degree = document.getElementById('server-degree').value.trim();
+            const hours = parseFloat(document.getElementById('server-hours').value);
+            const color = document.getElementById('server-color').value;
+
+            const existingInCentral = appState.centralDatabase.find(s => s.id === id);
+            const createdAt = existingInCentral ? (existingInCentral.createdAt || Date.now()) : Date.now();
+
+            const updatedServerData = {
+                id,
+                nickname,
+                fullname,
+                location,
+                locationColor,
+                reg,
+                role,
+                degree,
+                hours,
+                color,
+                createdAt
+            };
+
+            // 1. SINCRONIZA O SERVIDOR NA BASE CENTRAL
+            const centralIndex = appState.centralDatabase.findIndex(s => s.id === id);
+            if (centralIndex >= 0) {
+                appState.centralDatabase[centralIndex] = { ...appState.centralDatabase[centralIndex], ...updatedServerData };
+            } else {
+                appState.centralDatabase.push(updatedServerData);
+            }
+
+            // 2. SINCRONIZA O SERVIDOR EM TODOS OS SETORES QUE O CONTÉM
+            appState.sectors.forEach(sec => {
+                const secIndex = sec.servers.findIndex(s => s.id === id);
+                if (secIndex >= 0) {
+                    sec.servers[secIndex] = { ...sec.servers[secIndex], ...updatedServerData };
+                } else if (!isCentral && sec.id === getCurrentSector()?.id) {
+                    sec.servers.push(updatedServerData);
+                }
+            });
+
+            // 3. PROPAGAÇÃO GLOBAL: ATUALIZA A COR DE TODAS AS LOTAÇÕES COM O MESMO NOME
+            propagateLocationColorGlobally(location, locationColor);
+
+            saveToLocalStorage();
+            closeServerModal();
+
+            populateCentralLocationFilter();
+            renderCentralDatabaseTable();
+            renderServers();
+            renderScheduleTable();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function propagateLocationColorGlobally(locationName, newColor) {
+            if (!locationName || !newColor) return;
+            const targetLoc = locationName.trim().toLowerCase();
+
+            appState.centralDatabase.forEach(s => {
+                if (s.location && s.location.trim().toLowerCase() === targetLoc) {
+                    s.locationColor = newColor;
+                }
+            });
+
+            appState.sectors.forEach(sec => {
+                sec.servers.forEach(s => {
+                    if (s.location && s.location.trim().toLowerCase() === targetLoc) {
+                        s.locationColor = newColor;
+                    }
+                });
+            });
+        }
+
+        function editServer(id) {
+            openServerModal(id, false);
+        }
+
+        function deleteServer(id) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (confirm("Deseja remover este servidor do setor atual? A grade dele será limpa neste setor.")) {
+                currentSector.servers = currentSector.servers.filter(s => s.id !== id);
+                selectedSectorServerIds.delete(id);
+                clearServerSchedule(id, false);
+                saveToLocalStorage();
+                updateSectorBatchControls();
+                renderServers();
+                renderScheduleTable();
+                checkAndRenderOverloadAlerts();
+            }
+        }
+
+        function clearServerSchedule(serverId, shouldConfirm = true) {
+            const currentSector = getCurrentSector();
+            if (!currentSector) return;
+
+            if (shouldConfirm && !confirm("Deseja remover todos os horários alocados para este servidor?")) {
+                return;
+            }
+
+            for (let cellId in currentSector.schedule) {
+                if (Array.isArray(currentSector.schedule[cellId])) {
+                    currentSector.schedule[cellId] = currentSector.schedule[cellId].filter(alloc => alloc.serverId !== serverId);
+                    if (currentSector.schedule[cellId].length === 0) {
+                        delete currentSector.schedule[cellId];
+                    }
+                }
+            }
+
+            saveToLocalStorage();
+            renderScheduleTable();
+            renderServers();
+            checkAndRenderOverloadAlerts();
+        }
+
+        function highlightServerSchedule(serverId) {
+            const blocks = document.querySelectorAll('.time-slot-block');
+            blocks.forEach(block => {
+                if (serverId === 'ALL' || block.dataset.serverId === serverId) {
+                    block.style.opacity = '1';
+                    block.classList.remove('grayscale');
+                } else {
+                    block.style.opacity = '0.15';
+                    block.classList.add('grayscale');
+                }
+            });
+        }
+
+        // --- IMPORTAÇÃO EXCEL (.XLSX) E CSV COM TRATAMENTO DE ACENTOS E CARACTERES ESPECIAIS ---
+        function openCsvHelpModal() {
+            document.getElementById('modal-csv-help').classList.remove('hidden');
+        }
+
+        function closeCsvHelpModal() {
+            document.getElementById('modal-csv-help').classList.add('hidden');
+        }
+
+        function triggerImportCsv() {
+            document.getElementById('import-csv-input').click();
+        }
+
+        function downloadCsvTemplate() {
+            const csvContent = "\uFEFFNome Fantasia,Nome Completo,Lotação,Cor Lotação,Matrícula,Função,Titulação,Carga Horária,Cor\n" +
+                "Maria Souza,Maria de Souza Lima,DIAC,#e0f2fe,10293,Matemática,Mestre,40,#e0f2fe\n" +
+                "João Carlos,João Carlos Ferreira,Coordenação TI,#dcfce7,88392,Português,Doutor,20,#dcfce7\n" +
+                "Cláudia Mendes,Cláudia de Mendes e Silva,Coordenação Edificações,#fef9c3,77102,Edificações,Especialista,40,#fef9c3\n";
+            
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", "modelo_servidores_diac_sga.csv");
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        }
+
+        function normalizeHeader(str) {
+            if (!str) return '';
+            return str.toString()
+                .toLowerCase()
+                .normalize("NFD")
+                .replace(/[\u0300-\u036f]/g, "")
+                .replace(/[^a-z0-9]/g, "");
+        }
+
+        function importSpreadsheetData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const fileName = file.name.toLowerCase();
+            const isExcel = fileName.endsWith('.xlsx') || fileName.endsWith('.xls');
+
+            const reader = new FileReader();
+
+            if (isExcel) {
+                reader.onload = function(e) {
+                    try {
+                        const data = new Uint8Array(e.target.result);
+                        const workbook = XLSX.read(data, { type: 'array' });
+                        const firstSheetName = workbook.SheetNames[0];
+                        const worksheet = workbook.Sheets[firstSheetName];
+                        const rows = XLSX.utils.sheet_to_json(worksheet, { header: 1, defval: '' });
+
+                        processParsedRows(rows);
+                    } catch (err) {
+                        console.error("Erro leitura Excel:", err);
+                        alert("Erro ao ler o arquivo Excel. Verifique se o arquivo está corrompido ou protegido.");
+                    } finally {
+                        event.target.value = '';
+                    }
+                };
+                reader.readAsArrayBuffer(file);
+            } else {
+                reader.onload = function(e) {
+                    try {
+                        const text = e.target.result;
+                        const lines = text.split(/\r\n|\n/);
+                        if (lines.length < 2) {
+                            alert("O arquivo selecionado está vazio.");
+                            return;
+                        }
+
+                        const firstLine = lines[0];
+                        let delimiter = ';';
+                        if (firstLine.includes('\t')) delimiter = '\t';
+                        else if ((firstLine.match(/;/g) || []).length >= (firstLine.match(/,/g) || []).length) delimiter = ';';
+                        else delimiter = ',';
+
+                        const rows = lines.map(line => {
+                            if (!line.trim()) return [];
+                            return line.split(delimiter).map(col => col.replace(/^["']|["']$/g, '').trim());
+                        }).filter(r => r.length > 0);
+
+                        processParsedRows(rows);
+                    } catch (err) {
+                        console.error("Erro leitura CSV:", err);
+                        alert("Erro ao ler o arquivo CSV.");
+                    } finally {
+                        event.target.value = '';
+                    }
+                };
+                reader.readAsText(file, 'UTF-8');
+            }
+        }
+
+        function processParsedRows(rows) {
+            if (!rows || rows.length < 2) {
+                alert("A planilha selecionada não possui dados suficientes (mínimo de cabeçalho + 1 linha).");
+                return;
+            }
+
+            const headerRow = rows[0].map(h => normalizeHeader(h));
+            
+            let idxNickname = headerRow.findIndex(h => h.includes('fantasia') || h === 'apelido' || h === 'nome');
+            let idxFullname = headerRow.findIndex(h => h.includes('completo'));
+            let idxLocation = headerRow.findIndex(h => h.includes('lotacao') || h.includes('setor'));
+            let idxLocationColor = headerRow.findIndex(h => h.includes('corlotacao'));
+            let idxReg = headerRow.findIndex(h => h.includes('matricula') || h.includes('siape') || h === 'reg');
+            let idxRole = headerRow.findIndex(h => h.includes('funcao') || h.includes('cargo') || h.includes('disciplina'));
+            let idxDegree = headerRow.findIndex(h => h.includes('titulacao') || h.includes('formacao'));
+            let idxHours = headerRow.findIndex(h => h.includes('cargahoraria') || h.includes('horas') || h === 'ch');
+            let idxColor = headerRow.findIndex(h => h === 'cor' || h === 'corservidor' || h.includes('corcard'));
+
+            if (idxNickname === -1) idxNickname = 0;
+            if (idxFullname === -1) idxFullname = (rows[0].length > 1 ? 1 : 0);
+            if (idxLocation === -1 && rows[0].length >= 3) idxLocation = 2;
+            if (idxLocationColor === -1 && rows[0].length >= 4 && String(rows[1][3]).startsWith('#')) idxLocationColor = 3;
+
+            let addedCount = 0;
+            let timestampBase = Date.now();
+
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                if (!row || row.length === 0 || !row[idxNickname]) continue;
+
+                const nickname = String(row[idxNickname] || '').trim();
+                if (!nickname) continue;
+
+                const fullname = (idxFullname >= 0 && row[idxFullname]) ? String(row[idxFullname]).trim() : nickname;
+                const location = (idxLocation >= 0 && row[idxLocation]) ? String(row[idxLocation]).trim() : 'DIAC';
+                
+                let locationColor = (idxLocationColor >= 0 && row[idxLocationColor] && String(row[idxLocationColor]).startsWith('#'))
+                    ? String(row[idxLocationColor]).trim()
+                    : (findColorByLocation(location) || '#e0e7ff');
+
+                const reg = (idxReg >= 0 && row[idxReg]) ? String(row[idxReg]).trim() : '';
+                const role = (idxRole >= 0 && row[idxRole]) ? String(row[idxRole]).trim() : 'Docente / Técnico';
+                const degree = (idxDegree >= 0 && row[idxDegree]) ? String(row[idxDegree]).trim() : '';
+                
+                let hours = 40;
+                if (idxHours >= 0 && row[idxHours]) {
+                    const parsedH = parseFloat(String(row[idxHours]).replace(',', '.'));
+                    if (!isNaN(parsedH) && parsedH > 0) hours = parsedH;
+                }
+
+                let color = SOFT_PASTEL_COLORS[Math.floor(Math.random() * SOFT_PASTEL_COLORS.length)];
+                if (idxColor >= 0 && row[idxColor] && String(row[idxColor]).startsWith('#')) {
+                    color = String(row[idxColor]).trim();
+                }
+
+                appState.centralDatabase.push({
+                    id: 'cs_' + (timestampBase + i),
+                    nickname,
+                    fullname,
+                    location,
+                    locationColor,
+                    reg,
+                    role,
+                    degree,
+                    hours,
+                    color,
+                    createdAt: timestampBase + i
+                });
+
+                propagateLocationColorGlobally(location, locationColor);
+                addedCount++;
+            }
+
+            if (addedCount > 0) {
+                saveToLocalStorage();
+                populateCentralLocationFilter();
+                renderCentralDatabaseTable();
+                closeCsvHelpModal();
+                alert(`${addedCount} servidor(es) importado(s) com sucesso com acentuação e dados preservados!`);
+            } else {
+                alert("Nenhum registro válido de servidor pôde ser extraído da planilha informada.");
+            }
+        }
+
+        // --- BACKUP JSON ---
+        function exportBackupData() {
+            const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(appState, null, 2));
+            const downloadAnchor = document.createElement('a');
+            const fileName = `backup_horarios_diac_sga_${new Date().toISOString().slice(0,10)}.json`;
+            
+            downloadAnchor.setAttribute("href", dataStr);
+            downloadAnchor.setAttribute("download", fileName);
+            document.body.appendChild(downloadAnchor);
+            downloadAnchor.click();
+            downloadAnchor.remove();
+        }
+
+        function triggerImportData() {
+            document.getElementById('import-file-input').click();
+        }
+
+        function importBackupData(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const imported = JSON.parse(e.target.result);
+                    if (imported.sectors && imported.centralDatabase) {
+                        if (confirm("Deseja substituir as configurações atuais pelas do arquivo selecionado?")) {
+                            appState = imported;
+                            ensureIntervalServerExists();
+                            ensureDefaultTurnBreaksPreFilled();
+                            saveToLocalStorage();
+                            renderTabs();
+                            switchTab(appState.activeTab);
+                            alert("Dados restaurados com sucesso!");
+                        }
+                    } else {
+                        alert("Formato de backup inválido.");
+                    }
+                } catch (err) {
+                    alert("Erro ao ler o arquivo JSON.");
+                } finally {
+                    event.target.value = '';
+                }
+            };
+            reader.readAsText(file);
+        }
+
+        // --- EXPORTAÇÃO PDF ---
+        function exportToPDF() {
+            const element = document.getElementById('pdf-container');
+            const removeButtons = element.querySelectorAll('button');
+            removeButtons.forEach(btn => btn.style.display = 'none');
+
+            const opt = {
+                margin:       [0.3, 0.3, 0.3, 0.3],
+                filename:     `Gestao_Horarios_${getCurrentSector().name}.pdf`,
+                image:        { type: 'jpeg', quality: 0.98 },
+                html2canvas:  { scale: 2, useCORS: true, logging: false },
+                jsPDF:        { unit: 'in', format: 'a4', orientation: 'landscape' }
+            };
+
+            html2pdf().set(opt).from(element).save().then(() => {
+                removeButtons.forEach(btn => btn.style.display = '');
+            }).catch(err => {
+                console.error("Erro PDF:", err);
+                removeButtons.forEach(btn => btn.style.display = '');
+            });
+        }
+
+        function getAdjustedColor(hex, percent) {
+            if (!hex || hex.length < 6) return '#64748b';
+            let num = parseInt(hex.replace('#', ''), 16),
+                amt = Math.round(2.55 * percent),
+                R = (num >> 16) + amt,
+                B = (num >> 8 & 0x00FF) + amt,
+                G = (num & 0x0000FF) + amt;
+
+            return '#' + (0x1000000 + (R < 255 ? R < 1 ? 0 : R : 255) * 0x10000 + (B < 255 ? B < 1 ? 0 : B : 255) * 0x100 + (G < 255 ? G < 1 ? 0 : G : 255)).toString(16).slice(1);
+        }
+    </script>
+</body>
+</html>
