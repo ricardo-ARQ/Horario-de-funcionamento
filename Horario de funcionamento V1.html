@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gestão de Horários - Diac/SGA</title>
+    <title>Horários de Funcionamento dos Setores - Diac/SGA</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- FontAwesome Icons -->
@@ -101,7 +101,7 @@
                     <i class="fa-solid fa-calendar-days text-xl"></i>
                 </div>
                 <div>
-                    <h1 class="font-bold text-lg leading-tight tracking-tight">Gestão de Horários</h1>
+                    <h1 class="font-bold text-lg leading-tight tracking-tight">Horários de Funcionamento dos Setores</h1>
                     <p class="text-xs text-slate-400 font-medium">Diac/SGA – Ricardo Souza Marques</p>
                 </div>
                 <div id="supabase-sync-badge" class="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-medium bg-slate-800 text-slate-300 border border-slate-700" title="Status da sincronizacao com a nuvem (Supabase)">
@@ -760,7 +760,7 @@
     </div>
 
     <!-- Container de Notificações Toast Flutuantes -->
-    <div id="toast-container" class="fixed bottom-5 right-5 z-50 flex flex-col gap-2 pointer-events-none no-print max-w-sm w-full"></div>
+    <div id="toast-container" class="fixed top-5 right-5 z-50 flex flex-col gap-2 pointer-events-none no-print max-w-sm w-full"></div>
 
     <script>
         const DAYS = ['SEG', 'TER', 'QUA', 'QUI', 'SEX'];
@@ -811,7 +811,7 @@
             if (!container) return;
 
             const toast = document.createElement('div');
-            toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-xl border text-xs font-medium transition-all transform duration-300 translate-y-4 opacity-0 ${
+            toast.className = `pointer-events-auto flex items-center gap-2.5 px-4 py-3 rounded-xl shadow-xl border text-xs font-medium transition-all transform duration-300 -translate-y-4 opacity-0 ${
                 type === 'success' ? 'bg-slate-900 border-emerald-500/60 text-white' :
                 type === 'error' ? 'bg-slate-900 border-red-500/60 text-white' :
                 type === 'warning' ? 'bg-slate-900 border-amber-500/60 text-white' :
@@ -834,12 +834,12 @@
 
             container.appendChild(toast);
             requestAnimationFrame(() => {
-                toast.classList.remove('translate-y-4', 'opacity-0');
+                toast.classList.remove('-translate-y-4', 'opacity-0');
             });
 
             setTimeout(() => {
                 if (toast.parentElement) {
-                    toast.classList.add('opacity-0', 'translate-y-2');
+                    toast.classList.add('opacity-0', '-translate-y-2');
                     setTimeout(() => toast.remove(), 300);
                 }
             }, duration);
@@ -850,7 +850,7 @@
             if (!container) return;
 
             const toast = document.createElement('div');
-            toast.className = "pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl border bg-slate-900 border-amber-500/60 text-white text-xs font-medium transition-all transform duration-300 translate-y-4 opacity-0";
+            toast.className = "pointer-events-auto flex items-center gap-3 px-4 py-3 rounded-xl shadow-xl border bg-slate-900 border-amber-500/60 text-white text-xs font-medium transition-all transform duration-300 -translate-y-4 opacity-0";
 
             const btnId = 'toast-action-' + Date.now();
             toast.innerHTML = `
@@ -866,7 +866,7 @@
 
             container.appendChild(toast);
             requestAnimationFrame(() => {
-                toast.classList.remove('translate-y-4', 'opacity-0');
+                toast.classList.remove('-translate-y-4', 'opacity-0');
             });
 
             const actionBtn = document.getElementById(btnId);
@@ -879,7 +879,7 @@
 
             setTimeout(() => {
                 if (toast.parentElement) {
-                    toast.classList.add('opacity-0', 'translate-y-2');
+                    toast.classList.add('opacity-0', '-translate-y-2');
                     setTimeout(() => toast.remove(), 300);
                 }
             }, duration);
@@ -926,6 +926,7 @@
         let supabaseClient = null;
         let supabaseSyncTimeout = null;
         let isApplyingRemoteUpdate = false;
+        const LOCAL_CLIENT_ID = "client_" + Math.random().toString(36).substring(2, 10) + "_" + Date.now();
 
         if (window.supabase && typeof window.supabase.createClient === 'function') {
             try {
@@ -970,7 +971,8 @@
                     .upsert({
                         id: 'main_state',
                         data: appState,
-                        updated_at: new Date().toISOString()
+                        updated_at: new Date().toISOString(),
+                        updated_by: LOCAL_CLIENT_ID
                     });
                 if (error) throw error;
                 updateSupabaseStatus('synced', 'Salvo na nuvem');
@@ -987,16 +989,36 @@
                     .channel('public:app_state')
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'app_state' }, payload => {
                         if (payload && payload.new && payload.new.id === 'main_state' && payload.new.data) {
+                            // Ignora atualizacao gerada por este proprio navegador
+                            if (payload.new.updated_by && payload.new.updated_by === LOCAL_CLIENT_ID) {
+                                return;
+                            }
                             const remoteData = payload.new.data;
                             if (remoteData.sectors && remoteData.centralDatabase) {
                                 isApplyingRemoteUpdate = true;
+                                const preservedBrush = activeBrushServerId;
+                                const prevTab = appState.activeTab;
                                 appState = remoteData;
                                 sanitizeLoadedState(appState);
                                 try {
                                     localStorage.setItem('diac_sga_appstate_v10', JSON.stringify(appState));
                                 } catch(e) {}
                                 renderTabs();
-                                switchTab(appState.activeTab || 'sec_default');
+                                if (prevTab && appState.sectors.some(s => s.id === prevTab)) {
+                                    appState.activeTab = prevTab;
+                                }
+                                renderScheduleTable();
+                                renderServers();
+                                if (preservedBrush) {
+                                    activeBrushServerId = preservedBrush;
+                                    const brushServer = findServerAnywhere(preservedBrush);
+                                    if (brushServer) {
+                                        const bar = document.getElementById('active-brush-bar');
+                                        if (bar) bar.classList.remove('hidden');
+                                        const brushNameEl = document.getElementById('active-brush-name');
+                                        if (brushNameEl) brushNameEl.innerText = brushServer.nickname;
+                                    }
+                                }
                                 showToastNotification('Grade sincronizada em tempo real!', 'info', 4000);
                                 updateSupabaseStatus('synced', 'Atualizado em tempo real');
                                 setTimeout(() => { isApplyingRemoteUpdate = false; }, 600);
@@ -3278,7 +3300,9 @@
                 document.getElementById('server-reg').value = server.reg || '';
                 document.getElementById('server-role').value = server.role;
                 document.getElementById('server-degree').value = server.degree || '';
-                document.getElementById('server-hours').value = server.hours;
+                const currentSecForEdit = getCurrentSector();
+                const sectorServerObj = (!isCentral && currentSecForEdit) ? currentSecForEdit.servers.find(s => s.id === server.id) : null;
+                document.getElementById('server-hours').value = (sectorServerObj && sectorServerObj.hours !== undefined) ? sectorServerObj.hours : server.hours;
                 document.getElementById('server-color').value = server.color;
             } else {
                 title.innerText = isCentral ? "Novo Servidor (Base Central)" : "Adicionar Servidor ao Setor";
