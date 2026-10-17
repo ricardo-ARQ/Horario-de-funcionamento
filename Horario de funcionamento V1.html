@@ -966,13 +966,13 @@
             if (!supabaseClient || isApplyingRemoteUpdate) return;
             try {
                 updateSupabaseStatus('syncing', 'Salvando na nuvem...');
+                const payloadData = Object.assign({}, appState, { _updatedBy: LOCAL_CLIENT_ID });
                 const { error } = await supabaseClient
                     .from('app_state')
                     .upsert({
                         id: 'main_state',
-                        data: appState,
-                        updated_at: new Date().toISOString(),
-                        updated_by: LOCAL_CLIENT_ID
+                        data: payloadData,
+                        updated_at: new Date().toISOString()
                     });
                 if (error) throw error;
                 updateSupabaseStatus('synced', 'Salvo na nuvem');
@@ -990,7 +990,7 @@
                     .on('postgres_changes', { event: '*', schema: 'public', table: 'app_state' }, payload => {
                         if (payload && payload.new && payload.new.id === 'main_state' && payload.new.data) {
                             // Ignora atualizacao gerada por este proprio navegador
-                            if (payload.new.updated_by && payload.new.updated_by === LOCAL_CLIENT_ID) {
+                            if (payload.new.data && payload.new.data._updatedBy && payload.new.data._updatedBy === LOCAL_CLIENT_ID) {
                                 return;
                             }
                             const remoteData = payload.new.data;
